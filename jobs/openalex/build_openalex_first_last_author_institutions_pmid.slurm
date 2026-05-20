@@ -10,7 +10,14 @@
 #SBATCH --account=sebratt
 #SBATCH --partition=standard
 
-module load python/3.9
+PYTHON=/xdisk/sebratt/jinyugao/envs/innovation_capacity/bin/python
+
+if [ ! -x "$PYTHON" ]; then
+    echo "Missing Python environment: $PYTHON"
+    echo "Create it with: python3 -m venv /xdisk/sebratt/jinyugao/envs/innovation_capacity"
+    echo "Then install dependencies with: /xdisk/sebratt/jinyugao/envs/innovation_capacity/bin/pip install pandas"
+    exit 1
+fi
 
 REPO_DIR=/xdisk/sebratt/jinyugao/repos/innovation_capacity
 LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_first_last_author_institutions_pmid
@@ -18,4 +25,4 @@ LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-python code/openalex/build_openalex_first_last_author_institutions_pmid.py
+"$PYTHON" code/openalex/build_openalex_first_last_author_institutions_pmid.py

@@ -11,7 +11,14 @@
 #SBATCH --partition=standard
 #SBATCH --array=0-39
 
-module load python/3.9
+PYTHON=/xdisk/sebratt/jinyugao/envs/innovation_capacity/bin/python
+
+if [ ! -x "$PYTHON" ]; then
+    echo "Missing Python environment: $PYTHON"
+    echo "Create it with: python3 -m venv /xdisk/sebratt/jinyugao/envs/innovation_capacity"
+    echo "Then install dependencies with: /xdisk/sebratt/jinyugao/envs/innovation_capacity/bin/pip install pandas"
+    exit 1
+fi
 
 REPO_DIR=/xdisk/sebratt/jinyugao/repos/innovation_capacity
 LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_edge_transition
@@ -19,4 +26,4 @@ LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_n
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-python code/link_prediction/common_neighbor/build_common_neighbor_edge_transition.py
+"$PYTHON" code/link_prediction/common_neighbor/build_common_neighbor_edge_transition.py
