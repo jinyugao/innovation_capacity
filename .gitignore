@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Data and generated outputs should stay outside Git.
+/data/
+/outputs/
+/logs/
+/temp/
+*.csv
+*.csv.gz
+*.parquet
+*.pkl
+*.zip
