@@ -26,4 +26,4 @@ LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/annotate_commo
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" code/link_prediction/common_neighbor/annotate_common_neighbor_link_prediction.py
+"$PYTHON" code/link_prediction/legacy/annotate_common_neighbor_link_prediction.py

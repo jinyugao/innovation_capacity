@@ -1,4 +1,4 @@
-"""Annotate yearly SemMedDB predications with common-neighbor link-prediction labels."""
+"""Legacy common-neighbor-only annotation for yearly SemMedDB predications."""
 
 from __future__ import annotations
 
@@ -10,9 +10,13 @@ import pandas as pd
 from pandas.errors import EmptyDataError
 
 
-LINK_PREDICTION_DIR = Path(
+PRIOR_FIVE_YEAR_EDGE_DIR = Path(
     "/xdisk/sebratt/jinyugao/projects/innovation_capacity/data/interim/"
-    "common_neighbor_link_prediction"
+    "link_prediction/candidate_edges/prior_five_year_edges"
+)
+COMMON_NEIGHBOR_SCORE_DIR = Path(
+    "/xdisk/sebratt/jinyugao/projects/innovation_capacity/data/interim/"
+    "common_neighbor_link_prediction/candidate_edges"
 )
 SPLIT_PREDICATION_DIR = Path(
     "/xdisk/sebratt/jinyugao/projects/innovation_capacity/data/interim/semmedVER43_R/"
@@ -72,19 +76,19 @@ def read_candidate_edges(path: Path) -> dict[tuple[str, str], int]:
         candidate_edges = pd.read_csv(
             path,
             compression="gzip",
-            usecols=["node_a", "node_b", "cn_count"],
+            usecols=["node_a", "node_b", "common_neighbor_score"],
             dtype={"node_a": "string", "node_b": "string"},
         )
     except EmptyDataError:
         return {}
 
     candidate_edges = candidate_edges.dropna(subset=["node_a", "node_b"])
-    candidate_edges["cn_count"] = pd.to_numeric(
-        candidate_edges["cn_count"], errors="coerce"
+    candidate_edges["common_neighbor_score"] = pd.to_numeric(
+        candidate_edges["common_neighbor_score"], errors="coerce"
     ).fillna(0)
 
     return {
-        normalize_edge(row.node_a, row.node_b): int(row.cn_count)
+        normalize_edge(row.node_a, row.node_b): int(row.common_neighbor_score)
         for row in candidate_edges.itertuples(index=False)
     }
 
@@ -121,39 +125,36 @@ def classify_edges(
     ]
 
     categories = []
-    cn_counts = []
+    common_neighbor_scores = []
 
     for edge in edges:
         node_a, node_b = edge
 
         if not node_a or not node_b or node_a == node_b:
             categories.append("Self_Loop")
-            cn_counts.append(0)
+            common_neighbor_scores.append(0)
         elif edge in past_edges:
             categories.append("Repeated")
-            cn_counts.append(0)
+            common_neighbor_scores.append(0)
         elif edge in candidate_edges:
-            categories.append("Predicted")
-            cn_counts.append(candidate_edges[edge])
+            categories.append("Expected")
+            common_neighbor_scores.append(candidate_edges[edge])
         else:
-            categories.append("Unexpected")
-            cn_counts.append(0)
+            categories.append("Surprised")
+            common_neighbor_scores.append(0)
 
     annotated["category"] = categories
-    annotated["cn_count"] = cn_counts
+    annotated["common_neighbor_score"] = common_neighbor_scores
     return annotated
 
 
 def annotate_focal_year(focal_year: int) -> None:
     past_edges_file = (
-        LINK_PREDICTION_DIR
-        / "past_edges"
-        / f"common_neighbor_past_edges_5y_{focal_year}.csv.gz"
+        PRIOR_FIVE_YEAR_EDGE_DIR / f"prior_five_year_edges_{focal_year}.csv.gz"
     )
     candidate_edges_file = (
-        LINK_PREDICTION_DIR
-        / "candidate_edges"
-        / f"common_neighbor_candidate_edges_{focal_year}.csv.gz"
+        COMMON_NEIGHBOR_SCORE_DIR
+        / f"common_neighbor_scored_candidate_edges_{focal_year}.csv.gz"
     )
     predication_file = (
         SPLIT_PREDICATION_DIR / f"{INPUT_FILE_PREFIX}_{focal_year}.csv.gz"

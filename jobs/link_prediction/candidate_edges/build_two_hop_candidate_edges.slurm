@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=build_common_neighbor_link_prediction_candidates
-#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_link_prediction_candidates/build_common_neighbor_link_prediction_candidates_%A_%a.out
-#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_link_prediction_candidates/build_common_neighbor_link_prediction_candidates_%A_%a.err
+#SBATCH --job-name=build_two_hop_candidate_edges
+#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_two_hop_candidate_edges/build_two_hop_candidate_edges_%A_%a.out
+#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_two_hop_candidate_edges/build_two_hop_candidate_edges_%A_%a.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -21,9 +21,9 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 REPO_DIR=/xdisk/sebratt/jinyugao/repos/innovation_capacity
-LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_link_prediction_candidates
+LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_two_hop_candidate_edges
 
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" code/link_prediction/common_neighbor/build_common_neighbor_link_prediction_candidates.py
+"$PYTHON" code/link_prediction/candidate_edges/build_two_hop_candidate_edges.py
