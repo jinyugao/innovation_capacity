@@ -45,7 +45,10 @@ def split_file_for_year(year: int) -> Path:
 
 
 def candidate_file_for_year(focal_year: int) -> Path:
-    return CANDIDATE_EDGE_DIR / f"two_hop_candidate_edges_5y_{focal_year}.csv.gz"
+    return (
+        CANDIDATE_EDGE_DIR
+        / f"two_hop_candidate_edges_prior_5y_{focal_year}.csv.gz"
+    )
 
 
 def output_file_for_year(focal_year: int) -> Path:
