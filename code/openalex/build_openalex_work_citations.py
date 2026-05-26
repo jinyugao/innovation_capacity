@@ -25,7 +25,7 @@ from pandas.errors import EmptyDataError
 
 
 OPENALEX_DIR = Path(
-    "/xdisk/sebratt/jinyugao/data/products/openalex/flattened_snapshot_2025_all"
+    "/xdisk/sebratt/jinyugao/data/products/openalex/flattened_snapshot_2025"
 )
 WORKS_PUBLICATION_YEAR_FILE = OPENALEX_DIR / "openalex_works_publication_year.csv.gz"
 WORKS_REFERENCED_WORKS_FILE = OPENALEX_DIR / "openalex_works_referenced_works.csv.gz"
