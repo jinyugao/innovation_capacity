@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=build_common_neighbor_edge_transition
-#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_edge_transition/build_common_neighbor_edge_transition_%A_%a.out
-#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_edge_transition/build_common_neighbor_edge_transition_%A_%a.err
+#SBATCH --job-name=build_common_neighbor_top_10pct_edge_transition
+#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_top_10pct_edge_transition_%A_%a.out
+#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_top_10pct_edge_transition_%A_%a.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -21,9 +21,9 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 REPO_DIR=/xdisk/sebratt/jinyugao/repos/innovation_capacity
-LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_edge_transition
+LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_common_neighbor_top_10pct_edge_transition
 
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" code/link_prediction/common_neighbor/build_common_neighbor_edge_transition.py
+"$PYTHON" -u code/link_prediction/edge_transition/build_common_neighbor_top_10pct_edge_transition.py

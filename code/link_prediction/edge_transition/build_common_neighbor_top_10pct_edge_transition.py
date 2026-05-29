@@ -1,4 +1,10 @@
-"""Build common-neighbor edge-transition labels using future five-year SemMedDB predication edges."""
+"""Build common-neighbor edge-transition labels using future five-year edges.
+
+The focal-year CUI-CUI edge is treated as undirected. For each annotated
+focal-year predication, this script checks whether the same undirected edge
+appears in the following five years and labels the transition from the focal-year
+annotation to its future status.
+"""
 
 from __future__ import annotations
 
@@ -9,24 +15,23 @@ from pathlib import Path
 import pandas as pd
 
 
-ANNOTATED_PREDICATION_DIR = Path(
-    "/xdisk/sebratt/jinyugao/projects/innovation_capacity/data/interim/"
-    "annotated_predications"
+INTERIM_DIR = Path("/xdisk/sebratt/jinyugao/projects/innovation_capacity/data/interim")
+ANNOTATED_PREDICATION_DIR = (
+    INTERIM_DIR / "link_prediction/annotated_predications/common_neighbor/10pct"
 )
-SPLIT_PREDICATION_DIR = Path(
-    "/xdisk/sebratt/jinyugao/projects/innovation_capacity/data/interim/semmedVER43_R/"
-    "split_predications_with_pyear_filtered_by_pyear"
+SPLIT_PREDICATION_DIR = (
+    INTERIM_DIR / "semmedVER43_R/split_predications_with_pyear_filtered_by_pyear"
 )
-OUTPUT_DIR = Path(
-    "/xdisk/sebratt/jinyugao/projects/innovation_capacity/data/interim/"
-    "common_neighbor_edge_transition"
-)
+OUTPUT_DIR = INTERIM_DIR / "link_prediction/edge_transition/common_neighbor/10pct"
 
 ANNOTATED_FILE_PREFIX = (
-    "semmedVER43_R_predications_with_pyear_filtered_common_neighbor_annotated"
+    "semmedVER43_R_predications_with_pyear_filtered_common_neighbor_top_10pct_annotated"
 )
 SPLIT_FILE_PREFIX = "semmedVER43_R_predications_with_pyear_filtered"
-OUTPUT_FILE_PREFIX = "semmedVER43_R_predications_common_neighbor_edge_transition"
+OUTPUT_FILE_PREFIX = (
+    "semmedVER43_R_predications_with_pyear_filtered_common_neighbor_top_10pct_"
+    "edge_transition"
+)
 
 BASE_YEAR = 1980
 FUTURE_WINDOW_YEARS = 5
@@ -45,8 +50,8 @@ def get_focal_year() -> int:
 
 
 def normalize_edge(node_a: object, node_b: object) -> tuple[str, str]:
-    node_a_text = str(node_a).strip()
-    node_b_text = str(node_b).strip()
+    node_a_text = "" if pd.isna(node_a) else str(node_a).strip()
+    node_b_text = "" if pd.isna(node_b) else str(node_b).strip()
     return tuple(sorted((node_a_text, node_b_text)))
 
 
@@ -103,7 +108,7 @@ def build_future_edge_set(focal_year: int) -> set[tuple[str, str]]:
                 edge = normalize_edge(subject_cui, object_cui)
                 node_a, node_b = edge
 
-                if not node_a or not node_b or node_a == node_b:
+                if not node_a or not node_b:
                     continue
 
                 future_edges.add(edge)
@@ -129,6 +134,7 @@ def classify_transition(
     future_edges: set[tuple[str, str]],
 ) -> pd.DataFrame:
     annotated = chunk.copy()
+    transition_statuses = []
     transitions = []
 
     for subject_cui, object_cui, category in zip(
@@ -140,13 +146,23 @@ def classify_transition(
         node_a, node_b = edge
 
         if not node_a or not node_b or node_a == node_b or category == "Self_Loop":
-            transitions.append("Self_Loop")
+            transition_statuses.append("Not_Analyzed")
+            transitions.append(f"{category} -> Not_Analyzed")
             continue
 
-        future_status = "Adopted" if edge in future_edges else "Disappeared"
-        transitions.append(f"{category}_to_{future_status}")
+        appears_in_future_five_year_window = edge in future_edges
+        if category == "Repeated_Combination" and appears_in_future_five_year_window:
+            transition_status = "Continued"
+        elif appears_in_future_five_year_window:
+            transition_status = "Adopted"
+        else:
+            transition_status = "Disappeared"
 
-    annotated["edge_transition"] = transitions
+        transition_statuses.append(transition_status)
+        transitions.append(f"{category} -> {transition_status}")
+
+    annotated["future_five_year_transition"] = transition_statuses
+    annotated["focal_annotation_to_future_transition"] = transitions
     return annotated
 
 
@@ -178,7 +194,7 @@ def build_common_neighbor_edge_transition(focal_year: int) -> None:
 
     for chunk_number, chunk in enumerate(reader, start=1):
         transition_chunk = classify_transition(chunk, future_edges)
-        chunk_counts = Counter(transition_chunk["edge_transition"])
+        chunk_counts = Counter(transition_chunk["focal_annotation_to_future_transition"])
         category_counts.update(chunk_counts)
         total_rows += len(transition_chunk)
 
