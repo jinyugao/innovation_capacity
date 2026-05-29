@@ -1,14 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=build_openalex_work_citations
-#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_work_citations/build_openalex_work_citations_%j.out
-#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_work_citations/build_openalex_work_citations_%j.err
+#SBATCH --job-name=build_openalex_citation_partial_counts
+#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_citation_partial_counts_%A_%a.out
+#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_citation_partial_counts_%A_%a.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=256gb
-#SBATCH --time=72:00:00
+#SBATCH --time=24:00:00
 #SBATCH --account=sebratt
 #SBATCH --partition=standard
+#SBATCH --array=0-399%4
 
 PYTHON=/xdisk/sebratt/jinyugao/envs/innovation_capacity/bin/python
 
@@ -20,9 +21,9 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 REPO_DIR=/xdisk/sebratt/jinyugao/repos/innovation_capacity
-LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_work_citations
+LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs
 
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" code/openalex/build_openalex_work_citations.py
+"$PYTHON" -u code/openalex/build_openalex_citation_partial_counts.py
