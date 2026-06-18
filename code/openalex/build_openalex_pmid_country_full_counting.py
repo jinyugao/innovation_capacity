@@ -80,15 +80,27 @@ def build_pmid_country_counts(input_file: Path) -> dict[tuple[str, str], dict[st
         usecols=INPUT_COLUMNS,
         chunksize=CHUNK_SIZE,
         dtype="string",
+        keep_default_na=False,
+        na_filter=False,
     )
 
     for chunk_number, chunk in enumerate(reader, start=1):
         total_rows += len(chunk)
-        chunk = chunk.dropna(subset=["pmid", "institution_country_code"]).copy()
+        chunk = chunk.copy()
         chunk["pmid"] = chunk["pmid"].map(normalize_text)
         chunk["institution_country_code"] = chunk["institution_country_code"].map(
             normalize_text
         )
+        chunk["institution_country"] = chunk["institution_country"].map(normalize_text)
+
+        # Recover Namibia if an upstream pandas read converted its ISO code "NA"
+        # to a missing value before writing the authorship table.
+        namibia_without_code = (
+            (chunk["institution_country_code"] == "")
+            & (chunk["institution_country"].str.casefold() == "namibia")
+        )
+        chunk.loc[namibia_without_code, "institution_country_code"] = "NA"
+
         chunk = chunk[
             (chunk["pmid"] != "") & (chunk["institution_country_code"] != "")
         ]

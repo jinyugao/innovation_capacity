@@ -33,10 +33,11 @@ OPENALEX_DIR = Path(
 
 SOURCE_TRANSITION_COUNTRY_DIR = (
     PROJECT_INTERIM_DIR
-    / "country_adoption/first_layer_edge_transition_pmid_country_full_counting"
+    / "country_adoption/first_layer_edge_transition_pmid_country_full_counting_lists"
 )
-SPLIT_PREDICATION_DIR = (
-    PROJECT_INTERIM_DIR / "semmedVER43_R/split_predications_with_pyear_filtered_by_pyear"
+FUTURE_PREDICATION_COUNTRY_DIR = (
+    PROJECT_INTERIM_DIR
+    / "country_adoption/yearly_semmed_predications_pmid_country_full_counting_lists"
 )
 COUNTRY_FILE = OPENALEX_DIR / "openalex_pmid_country_full_counting.csv.gz"
 OUTPUT_DIR = PROJECT_INTERIM_DIR / "country_adoption/first_layer_country_adoption_network"
@@ -44,9 +45,12 @@ SUMMARY_DIR = OUTPUT_DIR / "summary"
 
 SOURCE_FILE_PREFIX = (
     "semmedVER43_R_predications_with_pyear_filtered_"
-    "first_layer_edge_transition_pmid_country_full_counting"
+    "first_layer_edge_transition_pmid_country_full_counting_lists"
 )
-SPLIT_FILE_PREFIX = "semmedVER43_R_predications_with_pyear_filtered"
+FUTURE_FILE_PREFIX = (
+    "semmedVER43_R_predications_with_pyear_filtered_"
+    "pmid_country_full_counting_lists"
+)
 OUTPUT_FILE_PREFIX = "first_layer_country_adoption_network"
 SUMMARY_FILE_PREFIX = "first_layer_country_adoption_network_summary"
 
@@ -66,6 +70,7 @@ ANNOTATION_COLUMN = "first_layer_edge_annotation"
 TRANSITION_COLUMN = "first_layer_future_five_year_transition"
 COUNTRY_CODE_COLUMN = "institution_country_code"
 COUNTRY_NAME_COLUMN = "institution_country"
+COUNTRY_CODE_LIST_COLUMN = "pmid_country_codes_full_counting"
 MATCH_KEY_COLUMN = "adoption_match_key"
 
 CATEGORY_NEW_NODE = "New_Node_Combination"
@@ -98,8 +103,7 @@ SOURCE_USE_COLUMNS = [
     PREDICATE_COLUMN,
     ANNOTATION_COLUMN,
     TRANSITION_COLUMN,
-    COUNTRY_CODE_COLUMN,
-    COUNTRY_NAME_COLUMN,
+    COUNTRY_CODE_LIST_COLUMN,
 ]
 FUTURE_USE_COLUMNS = [
     PREDICATION_ID_COLUMN,
@@ -107,6 +111,7 @@ FUTURE_USE_COLUMNS = [
     SUBJECT_CUI_COLUMN,
     OBJECT_CUI_COLUMN,
     PREDICATE_COLUMN,
+    COUNTRY_CODE_LIST_COLUMN,
 ]
 NETWORK_COLUMNS = [
     "focal_year",
@@ -157,8 +162,8 @@ def source_file_for_year(focal_year: int) -> Path:
     return SOURCE_TRANSITION_COUNTRY_DIR / f"{SOURCE_FILE_PREFIX}_{focal_year}.csv.gz"
 
 
-def split_file_for_year(year: int) -> Path:
-    return SPLIT_PREDICATION_DIR / f"{SPLIT_FILE_PREFIX}_{year}.csv.gz"
+def future_file_for_year(year: int) -> Path:
+    return FUTURE_PREDICATION_COUNTRY_DIR / f"{FUTURE_FILE_PREFIX}_{year}.csv.gz"
 
 
 def output_file_for_category(focal_year: int, category: str) -> Path:
@@ -194,7 +199,7 @@ def future_file_window_stats(focal_year: int) -> dict[str, object]:
     found_years = []
     missing_years = []
     for future_year in future_years_for_focal_year(focal_year):
-        if split_file_for_year(future_year).exists():
+        if future_file_for_year(future_year).exists():
             found_years.append(future_year)
         else:
             missing_years.append(future_year)
@@ -250,6 +255,8 @@ def load_pmid_country_table(country_file: Path) -> pd.DataFrame:
         compression="gzip",
         usecols=COUNTRY_COLUMNS,
         dtype="string",
+        keep_default_na=False,
+        na_filter=False,
     )
     country = country.rename(
         columns={
@@ -276,7 +283,33 @@ def load_pmid_country_table(country_file: Path) -> pd.DataFrame:
     return country
 
 
-def build_source_country_table(source_file: Path) -> pd.DataFrame:
+def country_name_by_code(country: pd.DataFrame) -> dict[str, str]:
+    names = (
+        country[["adopter_country_code", "adopter_country"]]
+        .drop_duplicates()
+        .sort_values(["adopter_country_code", "adopter_country"])
+    )
+    return (
+        names.drop_duplicates(subset=["adopter_country_code"], keep="first")
+        .set_index("adopter_country_code")["adopter_country"]
+        .to_dict()
+    )
+
+
+def split_country_codes(value: object) -> list[str]:
+    return sorted(
+        {
+            code.strip()
+            for code in normalize_value(value).split(";")
+            if code.strip()
+        }
+    )
+
+
+def build_source_country_table(
+    source_file: Path,
+    country_names: dict[str, str],
+) -> pd.DataFrame:
     source_chunks = []
     total_rows = 0
     adopted_rows = 0
@@ -287,6 +320,8 @@ def build_source_country_table(source_file: Path) -> pd.DataFrame:
         chunksize=CHUNK_SIZE,
         usecols=SOURCE_USE_COLUMNS,
         dtype="string",
+        keep_default_na=False,
+        na_filter=False,
     )
 
     for chunk_number, chunk in enumerate(reader, start=1):
@@ -294,13 +329,14 @@ def build_source_country_table(source_file: Path) -> pd.DataFrame:
         chunk = chunk.copy()
         chunk[ANNOTATION_COLUMN] = chunk[ANNOTATION_COLUMN].map(normalize_value)
         chunk[TRANSITION_COLUMN] = chunk[TRANSITION_COLUMN].map(normalize_value)
-        chunk[COUNTRY_CODE_COLUMN] = chunk[COUNTRY_CODE_COLUMN].map(normalize_value)
-        chunk[COUNTRY_NAME_COLUMN] = chunk[COUNTRY_NAME_COLUMN].map(normalize_value)
+        chunk[COUNTRY_CODE_LIST_COLUMN] = chunk[COUNTRY_CODE_LIST_COLUMN].map(
+            normalize_value
+        )
 
         chunk = chunk[
             chunk[ANNOTATION_COLUMN].isin(ADOPTION_CATEGORIES)
             & (chunk[TRANSITION_COLUMN] == TRANSITION_ADOPTED)
-            & (chunk[COUNTRY_CODE_COLUMN] != "")
+            & (chunk[COUNTRY_CODE_LIST_COLUMN] != "")
         ].copy()
         adopted_rows += len(chunk)
         if chunk.empty:
@@ -323,11 +359,22 @@ def build_source_country_table(source_file: Path) -> pd.DataFrame:
         if chunk.empty:
             continue
 
+        chunk["source_country_code"] = chunk[COUNTRY_CODE_LIST_COLUMN].map(
+            split_country_codes
+        )
+        chunk = chunk.explode("source_country_code", ignore_index=True)
+        chunk["source_country_code"] = chunk["source_country_code"].map(
+            normalize_value
+        )
+        chunk = chunk[chunk["source_country_code"] != ""].copy()
+        chunk["source_country"] = chunk["source_country_code"].map(country_names)
+        chunk["source_country"] = chunk["source_country"].fillna(
+            chunk["source_country_code"]
+        )
+
         chunk = chunk.rename(
             columns={
                 ANNOTATION_COLUMN: "edge_annotation",
-                COUNTRY_CODE_COLUMN: "source_country_code",
-                COUNTRY_NAME_COLUMN: "source_country",
             }
         )
         source_chunks.append(
@@ -396,12 +443,16 @@ def build_future_matches(
     chunk = add_match_keys(future_chunk)
     chunk[PMID_NORMALIZED_COLUMN] = chunk[PMID_COLUMN].map(normalize_pmid)
     chunk[PREDICATION_ID_COLUMN] = chunk[PREDICATION_ID_COLUMN].map(normalize_value)
+    chunk[COUNTRY_CODE_LIST_COLUMN] = chunk[COUNTRY_CODE_LIST_COLUMN].map(
+        normalize_value
+    )
 
     match_frames = []
     base_columns = [
         PREDICATION_ID_COLUMN,
         PMID_COLUMN,
         PMID_NORMALIZED_COLUMN,
+        COUNTRY_CODE_LIST_COLUMN,
         MATCH_KEY_COLUMN,
         "edge_annotation",
     ]
@@ -437,8 +488,8 @@ def build_future_matches(
 
 def update_network_counts(
     edges: pd.DataFrame,
-    predication_row_counts: Counter[tuple[str, str, str]],
-    future_pmid_sets: defaultdict[tuple[str, str, str], set[str]],
+    predication_row_counts: Counter[tuple[str, str, str, str, str]],
+    future_pmid_sets: defaultdict[tuple[str, str, str, str, str], set[str]],
 ) -> None:
     if edges.empty:
         return
@@ -472,7 +523,7 @@ def update_network_counts(
 def process_future_years(
     focal_year: int,
     source: pd.DataFrame,
-    country: pd.DataFrame,
+    country_names: dict[str, str],
 ) -> tuple[
     Counter[tuple[str, str, str, str, str]],
     defaultdict[tuple[str, str, str, str, str], set[str]],
@@ -495,7 +546,7 @@ def process_future_years(
     future_files_missing = []
 
     for future_year in future_years_for_focal_year(focal_year):
-        future_file = split_file_for_year(future_year)
+        future_file = future_file_for_year(future_year)
         if not future_file.exists():
             future_files_missing.append(future_year)
             continue
@@ -508,6 +559,8 @@ def process_future_years(
                 chunksize=CHUNK_SIZE,
                 usecols=FUTURE_USE_COLUMNS,
                 dtype="string",
+                keep_default_na=False,
+                na_filter=False,
             )
         except EmptyDataError:
             continue
@@ -521,14 +574,27 @@ def process_future_years(
             for category, count in future_matches["edge_annotation"].value_counts().items():
                 matched_predication_rows_by_category[str(category)] += int(count)
 
-            future_matches = future_matches.merge(
-                country,
-                how="inner",
-                on=PMID_NORMALIZED_COLUMN,
-                validate="many_to_many",
+            future_matches["adopter_country_code"] = future_matches[
+                COUNTRY_CODE_LIST_COLUMN
+            ].map(split_country_codes)
+            future_matches = future_matches.explode(
+                "adopter_country_code",
+                ignore_index=True,
             )
+            future_matches["adopter_country_code"] = future_matches[
+                "adopter_country_code"
+            ].map(normalize_value)
+            future_matches = future_matches[
+                future_matches["adopter_country_code"] != ""
+            ].copy()
             if future_matches.empty:
                 continue
+            future_matches["adopter_country"] = future_matches[
+                "adopter_country_code"
+            ].map(country_names)
+            future_matches["adopter_country"] = future_matches[
+                "adopter_country"
+            ].fillna(future_matches["adopter_country_code"])
 
             edges = future_matches.merge(
                 source[source_match_columns],
@@ -548,7 +614,7 @@ def process_future_years(
     if not future_files_found:
         raise FileNotFoundError(
             f"No future-year files found for focal year {focal_year} in "
-            f"{SPLIT_PREDICATION_DIR}."
+            f"{FUTURE_PREDICATION_COUNTRY_DIR}."
         )
 
     stats = {
@@ -729,7 +795,12 @@ def build_first_layer_country_adoption_network(focal_year: int) -> None:
     check_input(source_file)
     check_input(COUNTRY_FILE)
 
-    source = build_source_country_table(source_file)
+    country = load_pmid_country_table(COUNTRY_FILE)
+    country_names = country_name_by_code(country)
+    source = build_source_country_table(
+        source_file,
+        country_names,
+    )
     if source.empty:
         print(
             f"No adopted source country rows found for focal year {focal_year}; "
@@ -752,11 +823,10 @@ def build_first_layer_country_adoption_network(focal_year: int) -> None:
         )
         return
 
-    country = load_pmid_country_table(COUNTRY_FILE)
     predication_row_counts, future_pmid_sets, future_stats = process_future_years(
         focal_year=focal_year,
         source=source,
-        country=country,
+        country_names=country_names,
     )
     network = counts_to_dataframe(
         focal_year=focal_year,

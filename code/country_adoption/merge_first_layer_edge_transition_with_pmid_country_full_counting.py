@@ -1,9 +1,9 @@
-"""Merge first-layer edge transitions with PMID-country full-counting data.
+"""Merge first-layer edge transitions with PMID-level country lists.
 
-This script keeps edge transition as a knowledge-structure result and adds
-country information only afterward. The output is expanded to one row per
-transition row and PMID-country pair, using full counting at the PMID-country
-level.
+The merge preserves the predication-level structure of the edge-transition
+file. Each transition row remains one row and receives the full-counting country
+lists associated with its PMID. Country lists are expanded only later when the
+country adoption network is constructed.
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ OPENALEX_DIR = Path(
 )
 
 TRANSITION_DIR = PROJECT_INTERIM_DIR / "link_prediction/edge_transition/first_layer"
-COUNTRY_FILE = OPENALEX_DIR / "openalex_pmid_country_full_counting.csv.gz"
+COUNTRY_FILE = OPENALEX_DIR / "openalex_pmid_country_full_counting_lists.csv.gz"
 OUTPUT_DIR = (
     PROJECT_INTERIM_DIR
-    / "country_adoption/first_layer_edge_transition_pmid_country_full_counting"
+    / "country_adoption/first_layer_edge_transition_pmid_country_full_counting_lists"
 )
 SUMMARY_DIR = OUTPUT_DIR / "summary"
 
@@ -35,29 +35,25 @@ TRANSITION_FILE_PREFIX = (
 )
 OUTPUT_FILE_PREFIX = (
     "semmedVER43_R_predications_with_pyear_filtered_"
-    "first_layer_edge_transition_pmid_country_full_counting"
+    "first_layer_edge_transition_pmid_country_full_counting_lists"
 )
-SUMMARY_FILE_PREFIX = "first_layer_edge_transition_pmid_country_full_counting_summary"
+SUMMARY_FILE_PREFIX = (
+    "first_layer_edge_transition_pmid_country_full_counting_lists_summary"
+)
 
 BASE_YEAR = 1980
 N_YEARS = 40
 CHUNK_SIZE = 100_000
 OVERWRITE = False
-KEEP_UNMATCHED_TRANSITION_ROWS = False
+KEEP_UNMATCHED_TRANSITION_ROWS = True
 
 PMID_COLUMN = "PMID"
 PMID_NORMALIZED_COLUMN = "pmid_normalized"
-TRANSITION_ROW_ID_COLUMN = "_transition_row_id"
-
-COUNTRY_COLUMNS = [
+COUNTRY_LIST_COLUMNS = [
     "pmid",
-    "institution_country_code",
-    "institution_country",
-    "pmid_country_weight",
-    "n_work_ids_for_pmid_country",
-    "n_authors_for_pmid_country",
-    "n_institutions_for_pmid_country",
-    "n_authorship_institution_rows_for_pmid_country",
+    "pmid_country_codes_full_counting",
+    "pmid_country_full_counting",
+    "n_countries_for_pmid",
 ]
 
 
@@ -75,10 +71,14 @@ def get_focal_year() -> int:
     return BASE_YEAR + task_index
 
 
-def normalize_pmid(value: object) -> str:
+def normalize_text(value: object) -> str:
     if pd.isna(value):
         return ""
-    text = str(value).strip()
+    return str(value).strip()
+
+
+def normalize_pmid(value: object) -> str:
+    text = normalize_text(value)
     if not text:
         return ""
 
@@ -120,49 +120,61 @@ def check_output(path: Path) -> None:
         path.unlink()
 
 
-def load_pmid_country_table(country_file: Path) -> pd.DataFrame:
-    country = pd.read_csv(
+def load_pmid_country_lists(country_file: Path) -> pd.DataFrame:
+    country_lists = pd.read_csv(
         country_file,
         compression="gzip",
-        usecols=COUNTRY_COLUMNS,
+        usecols=COUNTRY_LIST_COLUMNS,
         dtype="string",
+        keep_default_na=False,
+        na_filter=False,
     )
-    country = country.rename(columns={"pmid": "openalex_pmid"})
-    country[PMID_NORMALIZED_COLUMN] = country["openalex_pmid"].map(normalize_pmid)
-    country = country[
-        (country[PMID_NORMALIZED_COLUMN] != "")
-        & country["institution_country_code"].notna()
-        & (country["institution_country_code"].str.strip() != "")
+    country_lists[PMID_NORMALIZED_COLUMN] = country_lists["pmid"].map(
+        normalize_pmid
+    )
+    country_lists = country_lists.drop(columns=["pmid"])
+    country_lists["pmid_country_codes_full_counting"] = country_lists[
+        "pmid_country_codes_full_counting"
+    ].map(normalize_text)
+    country_lists["pmid_country_full_counting"] = country_lists[
+        "pmid_country_full_counting"
+    ].map(normalize_text)
+    country_lists["n_countries_for_pmid"] = pd.to_numeric(
+        country_lists["n_countries_for_pmid"], errors="coerce"
+    ).astype("Int64")
+
+    country_lists = country_lists[
+        (country_lists[PMID_NORMALIZED_COLUMN] != "")
+        & (country_lists["pmid_country_codes_full_counting"] != "")
     ].copy()
-    country = country.drop_duplicates(
-        subset=[PMID_NORMALIZED_COLUMN, "institution_country_code"]
-    )
-    country["n_countries_for_pmid"] = country.groupby(PMID_NORMALIZED_COLUMN)[
-        "institution_country_code"
-    ].transform("nunique")
 
-    print(f"Loaded PMID-country rows: {len(country):,}")
-    print(
-        "Unique normalized PMIDs with country information: "
-        f"{country[PMID_NORMALIZED_COLUMN].nunique():,}"
-    )
-    return country
+    duplicate_pmids = country_lists[PMID_NORMALIZED_COLUMN].duplicated(keep=False)
+    if duplicate_pmids.any():
+        examples = ", ".join(
+            country_lists.loc[duplicate_pmids, PMID_NORMALIZED_COLUMN]
+            .drop_duplicates()
+            .head(10)
+        )
+        raise ValueError(
+            "Country-list input must contain one row per PMID. "
+            f"Duplicate normalized PMID examples: {examples}"
+        )
+
+    print(f"Loaded PMID country-list rows: {len(country_lists):,}.")
+    return country_lists
 
 
-def merge_transition_with_country(
+def merge_transition_with_country_lists(
     transition_file: Path,
-    country: pd.DataFrame,
+    country_lists: pd.DataFrame,
     output_file: Path,
 ) -> dict[str, object]:
     total_transition_rows = 0
     transition_rows_with_pmid = 0
+    matched_transition_rows = 0
     output_rows = 0
-    next_row_id = 0
-    matched_row_ids: set[int] = set()
     transition_pmids: set[str] = set()
-    transition_pmids_with_value: set[str] = set()
     matched_pmids: set[str] = set()
-    output_country_codes: set[str] = set()
     countries_per_matched_pmid: dict[str, int] = {}
     wrote_header = False
 
@@ -175,49 +187,40 @@ def merge_transition_with_country(
 
     for chunk_number, chunk in enumerate(reader, start=1):
         chunk = chunk.copy()
-        n_chunk_rows = len(chunk)
-        row_ids = range(next_row_id, next_row_id + n_chunk_rows)
-        chunk[TRANSITION_ROW_ID_COLUMN] = list(row_ids)
-        next_row_id += n_chunk_rows
-
-        total_transition_rows += n_chunk_rows
+        total_transition_rows += len(chunk)
         chunk[PMID_NORMALIZED_COLUMN] = chunk[PMID_COLUMN].map(normalize_pmid)
+
         pmid_mask = chunk[PMID_NORMALIZED_COLUMN] != ""
         transition_rows_with_pmid += int(pmid_mask.sum())
-        transition_pmids.update(chunk[PMID_NORMALIZED_COLUMN].dropna().unique())
-        transition_pmids_with_value.update(chunk.loc[pmid_mask, PMID_NORMALIZED_COLUMN])
+        transition_pmids.update(chunk.loc[pmid_mask, PMID_NORMALIZED_COLUMN])
 
-        how = "left" if KEEP_UNMATCHED_TRANSITION_ROWS else "inner"
         merged = chunk.merge(
-            country,
-            how=how,
+            country_lists,
+            how="left" if KEEP_UNMATCHED_TRANSITION_ROWS else "inner",
             on=PMID_NORMALIZED_COLUMN,
-            validate="many_to_many",
+            validate="many_to_one",
         )
 
-        if KEEP_UNMATCHED_TRANSITION_ROWS:
-            matched = merged["institution_country_code"].notna()
-        else:
-            matched = pd.Series(True, index=merged.index)
-
-        matched_row_ids.update(
-            merged.loc[matched, TRANSITION_ROW_ID_COLUMN].dropna().astype(int)
+        matched_mask = merged["pmid_country_codes_full_counting"].notna() & (
+            merged["pmid_country_codes_full_counting"].astype(str).str.strip() != ""
         )
-        matched_pmids.update(merged.loc[matched, PMID_NORMALIZED_COLUMN].dropna())
-        output_country_codes.update(
-            merged.loc[matched, "institution_country_code"].dropna().astype(str)
-        )
+        matched_transition_rows += int(matched_mask.sum())
+        matched_pmids.update(merged.loc[matched_mask, PMID_NORMALIZED_COLUMN])
         countries_per_matched_pmid.update(
-            merged.loc[matched, [PMID_NORMALIZED_COLUMN, "n_countries_for_pmid"]]
-            .drop_duplicates()
+            merged.loc[
+                matched_mask,
+                [PMID_NORMALIZED_COLUMN, "n_countries_for_pmid"],
+            ]
+            .drop_duplicates(subset=[PMID_NORMALIZED_COLUMN])
+            .dropna(subset=["n_countries_for_pmid"])
             .set_index(PMID_NORMALIZED_COLUMN)["n_countries_for_pmid"]
             .astype(int)
             .to_dict()
         )
 
-        merged = merged.drop(columns=[TRANSITION_ROW_ID_COLUMN])
+        output_chunk = merged.drop(columns=[PMID_NORMALIZED_COLUMN])
         mode = "w" if not wrote_header else "a"
-        merged.to_csv(
+        output_chunk.to_csv(
             output_file,
             index=False,
             compression="gzip",
@@ -225,26 +228,19 @@ def merge_transition_with_country(
             header=not wrote_header,
         )
         wrote_header = True
-        output_rows += len(merged)
+        output_rows += len(output_chunk)
 
         print(
-            f"Chunk {chunk_number:,}: transition rows {n_chunk_rows:,}; "
-            f"country-expanded output rows {len(merged):,}."
+            f"Chunk {chunk_number:,}: transition rows {len(chunk):,}; "
+            f"matched rows {int(matched_mask.sum()):,}; "
+            f"output rows {len(output_chunk):,}."
         )
 
     if not wrote_header:
         raise RuntimeError(f"No rows were read from transition file: {transition_file}")
 
-    transition_pmids.discard("")
-    transition_pmids_with_value.discard("")
-    matched_pmids.discard("")
-
-    n_matched_transition_rows = len(matched_row_ids)
-    n_unmatched_transition_rows = total_transition_rows - n_matched_transition_rows
-    n_transition_pmids_with_value = len(transition_pmids_with_value)
+    n_transition_pmids = len(transition_pmids)
     n_matched_pmids = len(matched_pmids)
-    n_unmatched_pmids = n_transition_pmids_with_value - n_matched_pmids
-
     mean_countries = (
         sum(countries_per_matched_pmid.values()) / len(countries_per_matched_pmid)
         if countries_per_matched_pmid
@@ -259,24 +255,25 @@ def merge_transition_with_country(
     return {
         "n_transition_rows": total_transition_rows,
         "n_transition_rows_with_pmid": transition_rows_with_pmid,
-        "n_transition_unique_pmids": len(transition_pmids),
-        "n_transition_unique_pmids_with_value": n_transition_pmids_with_value,
-        "n_matched_transition_rows": n_matched_transition_rows,
-        "n_unmatched_transition_rows": n_unmatched_transition_rows,
+        "n_matched_transition_rows": matched_transition_rows,
+        "n_unmatched_transition_rows": (
+            total_transition_rows - matched_transition_rows
+        ),
         "transition_row_match_rate": (
-            n_matched_transition_rows / total_transition_rows
+            matched_transition_rows / total_transition_rows
             if total_transition_rows
             else 0
         ),
+        "n_transition_unique_pmids_with_value": n_transition_pmids,
         "n_matched_unique_pmids": n_matched_pmids,
-        "n_unmatched_unique_pmids": n_unmatched_pmids,
+        "n_unmatched_unique_pmids": n_transition_pmids - n_matched_pmids,
         "pmid_match_rate": (
-            n_matched_pmids / n_transition_pmids_with_value
-            if n_transition_pmids_with_value
-            else 0
+            n_matched_pmids / n_transition_pmids if n_transition_pmids else 0
         ),
-        "n_country_expanded_output_rows": output_rows,
-        "n_unique_country_codes_in_output": len(output_country_codes),
+        "n_output_rows": output_rows,
+        "output_preserves_all_transition_rows": (
+            KEEP_UNMATCHED_TRANSITION_ROWS and output_rows == total_transition_rows
+        ),
         "mean_countries_per_matched_pmid": mean_countries,
         "max_countries_per_matched_pmid": max_countries,
         "keep_unmatched_transition_rows": KEEP_UNMATCHED_TRANSITION_ROWS,
@@ -286,16 +283,14 @@ def merge_transition_with_country(
 def write_summary(
     focal_year: int,
     transition_file: Path,
-    country_file: Path,
     output_file: Path,
     summary_file: Path,
     stats: dict[str, object],
 ) -> None:
-    summary_file.parent.mkdir(parents=True, exist_ok=True)
     summary = {
         "pyear": focal_year,
         "transition_input_file": str(transition_file),
-        "country_input_file": str(country_file),
+        "country_list_input_file": str(COUNTRY_FILE),
         "output_file": str(output_file),
         **stats,
     }
@@ -314,17 +309,20 @@ def main() -> None:
     check_output(output_file)
     check_output(summary_file)
 
-    country = load_pmid_country_table(COUNTRY_FILE)
-    stats = merge_transition_with_country(transition_file, country, output_file)
+    country_lists = load_pmid_country_lists(COUNTRY_FILE)
+    stats = merge_transition_with_country_lists(
+        transition_file,
+        country_lists,
+        output_file,
+    )
     write_summary(
         focal_year,
         transition_file,
-        COUNTRY_FILE,
         output_file,
         summary_file,
         stats,
     )
-    print(f"Saved merged transition-country file to {output_file}")
+    print(f"Saved transition-country-list file to {output_file}")
 
 
 if __name__ == "__main__":
