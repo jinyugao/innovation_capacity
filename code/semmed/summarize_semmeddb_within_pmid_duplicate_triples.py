@@ -14,6 +14,7 @@ each exact triple within a PMID.
 from __future__ import annotations
 
 import gc
+import os
 import re
 from pathlib import Path
 
@@ -37,7 +38,10 @@ GROUP_SIZE_OUTPUT_FILE = (
 COLLISION_EXAMPLE_OUTPUT_FILE = (
     OUTPUT_DIR / "semmeddb_primary_cui_collision_examples.csv"
 )
+YEARLY_OUTPUT_DIR = OUTPUT_DIR / "yearly"
 
+BASE_YEAR = 1975
+N_YEARS = 45
 OVERWRITE = False
 MAX_COLLISION_GROUPS_PER_YEAR_SCOPE = 100
 
@@ -133,8 +137,34 @@ def discover_yearly_files(input_dir: Path) -> list[tuple[int, Path]]:
     return yearly_files
 
 
+def get_array_year() -> int | None:
+    task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
+    if task_id is None:
+        return None
+
+    task_index = int(task_id)
+    if task_index < 0 or task_index >= N_YEARS:
+        raise ValueError(
+            f"SLURM_ARRAY_TASK_ID={task_index} is out of range. "
+            f"Expected 0-{N_YEARS - 1}."
+        )
+    return BASE_YEAR + task_index
+
+
+def yearly_output_files(pyear: int) -> tuple[Path, Path, Path]:
+    return (
+        YEARLY_OUTPUT_DIR
+        / f"semmeddb_within_pmid_duplicate_summary_{pyear}.csv",
+        YEARLY_OUTPUT_DIR
+        / f"semmeddb_within_pmid_duplicate_group_size_distribution_{pyear}.csv",
+        YEARLY_OUTPUT_DIR
+        / f"semmeddb_primary_cui_collision_examples_{pyear}.csv",
+    )
+
+
 def check_outputs(output_files: list[Path]) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for path in output_files:
+        path.parent.mkdir(parents=True, exist_ok=True)
     existing = [path for path in output_files if path.exists()]
     if existing and not OVERWRITE:
         examples = "\n".join(str(path) for path in existing)
@@ -501,16 +531,67 @@ def process_yearly_file(
     return summary_rows, group_size_rows, collision_example_rows
 
 
-def main() -> None:
+def write_output_tables(
+    summary_rows: list[dict[str, object]],
+    group_size_rows: list[dict[str, object]],
+    collision_example_rows: list[dict[str, object]],
+    summary_output_file: Path,
+    group_size_output_file: Path,
+    collision_example_output_file: Path,
+    add_overall_rows: bool,
+) -> None:
+    summary = pd.DataFrame(summary_rows)
+    if add_overall_rows:
+        summary = add_overall_summary(summary)
+    summary.to_csv(summary_output_file, index=False)
+
+    group_size_distribution = pd.DataFrame(group_size_rows)
+    if add_overall_rows:
+        group_size_distribution = add_overall_group_size_distribution(
+            group_size_distribution
+        )
+    group_size_distribution.to_csv(group_size_output_file, index=False)
+
+    collision_examples = pd.DataFrame(
+        collision_example_rows,
+        columns=COLLISION_EXAMPLE_COLUMNS,
+    )
+    collision_examples.to_csv(collision_example_output_file, index=False)
+
+    print(f"Saved summary to {summary_output_file}")
+    print(f"Saved group-size distribution to {group_size_output_file}")
+    print(f"Saved primary-CUI collision examples to {collision_example_output_file}")
+
+
+def run_array_year(pyear: int, yearly_files: dict[int, Path]) -> None:
+    input_file = yearly_files.get(pyear)
+    if input_file is None:
+        raise FileNotFoundError(
+            f"Missing filtered yearly SemMedDB file for array year {pyear}."
+        )
+
+    output_files = yearly_output_files(pyear)
+    check_outputs(list(output_files))
+    summary_rows, group_size_rows, collision_examples = process_yearly_file(
+        pyear,
+        input_file,
+    )
+    write_output_tables(
+        summary_rows,
+        group_size_rows,
+        collision_examples,
+        *output_files,
+        add_overall_rows=False,
+    )
+
+
+def run_all_years(yearly_files: list[tuple[int, Path]]) -> None:
     output_files = [
         SUMMARY_OUTPUT_FILE,
         GROUP_SIZE_OUTPUT_FILE,
         COLLISION_EXAMPLE_OUTPUT_FILE,
     ]
-    yearly_files = discover_yearly_files(INPUT_DIR)
     check_outputs(output_files)
-
-    print(f"Found {len(yearly_files):,} yearly SemMedDB files.")
     all_summary_rows = []
     all_group_size_rows = []
     all_collision_example_rows = []
@@ -524,25 +605,26 @@ def main() -> None:
         all_group_size_rows.extend(group_size_rows)
         all_collision_example_rows.extend(collision_examples)
 
-    summary = pd.DataFrame(all_summary_rows)
-    summary = add_overall_summary(summary)
-    summary.to_csv(SUMMARY_OUTPUT_FILE, index=False)
-
-    group_size_distribution = pd.DataFrame(all_group_size_rows)
-    group_size_distribution = add_overall_group_size_distribution(
-        group_size_distribution
-    )
-    group_size_distribution.to_csv(GROUP_SIZE_OUTPUT_FILE, index=False)
-
-    collision_examples = pd.DataFrame(
+    write_output_tables(
+        all_summary_rows,
+        all_group_size_rows,
         all_collision_example_rows,
-        columns=COLLISION_EXAMPLE_COLUMNS,
+        *output_files,
+        add_overall_rows=True,
     )
-    collision_examples.to_csv(COLLISION_EXAMPLE_OUTPUT_FILE, index=False)
 
-    print(f"Saved summary to {SUMMARY_OUTPUT_FILE}")
-    print(f"Saved group-size distribution to {GROUP_SIZE_OUTPUT_FILE}")
-    print(f"Saved primary-CUI collision examples to {COLLISION_EXAMPLE_OUTPUT_FILE}")
+
+def main() -> None:
+    discovered_files = discover_yearly_files(INPUT_DIR)
+    print(f"Found {len(discovered_files):,} yearly SemMedDB files.")
+    array_year = get_array_year()
+    if array_year is not None:
+        print(f"Running Slurm array task for year {array_year}.")
+        run_array_year(array_year, dict(discovered_files))
+        return
+
+    print("No Slurm array task detected; processing all discovered years.")
+    run_all_years(discovered_files)
 
 
 if __name__ == "__main__":
