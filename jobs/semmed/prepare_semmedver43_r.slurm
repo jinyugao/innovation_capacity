@@ -15,7 +15,7 @@ set -euo pipefail
 export IC_SEMMED_SOURCE_DIR="${IC_SEMMED_SOURCE_DIR:-/home/u23/jinyugao/research/data/source/semmedVER43_R}"
 export IC_PROJECT_ROOT="${IC_PROJECT_ROOT:-/xdisk/sebratt/jinyugao/research/projects/innovation_capacity}"
 export IC_REPO_ROOT="${IC_REPO_ROOT:-/xdisk/sebratt/jinyugao/research/repos/innovation_capacity}"
-export IC_PYTHON="${IC_PYTHON:-/home/u23/jinyugao/research/envs/innovation_capacity/bin/python}"
+export IC_PYTHON="${IC_PYTHON:-/xdisk/sebratt/jinyugao/research/envs/innovation_capacity/bin/python}"
 export IC_DUCKDB_THREADS="${IC_DUCKDB_THREADS:-${SLURM_CPUS_PER_TASK:-8}}"
 export IC_DUCKDB_MEMORY_LIMIT="${IC_DUCKDB_MEMORY_LIMIT:-110GB}"
 
@@ -25,7 +25,7 @@ mkdir -p "$LOG_DIR"
 
 if [ ! -x "$IC_PYTHON" ]; then
     echo "Missing Python environment: $IC_PYTHON"
-    echo "Create it with: python3 -m venv /home/u23/jinyugao/research/envs/innovation_capacity"
+    echo "Create it with: python3 -m venv /xdisk/sebratt/jinyugao/research/envs/innovation_capacity"
     echo "Then install dependencies with: $IC_PYTHON -m pip install pandas duckdb"
     exit 1
 fi
