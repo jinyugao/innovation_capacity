@@ -42,6 +42,11 @@ def sql_literal(value: Path | str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def parquet_list_sql(paths: list[Path]) -> str:
+    path_list = ", ".join(sql_literal(path) for path in paths)
+    return f"[{path_list}]"
+
+
 def configure_duckdb(con: duckdb.DuckDBPyConnection, temp_dir: Path) -> None:
     threads = os.environ.get("IC_DUCKDB_THREADS")
     memory_limit = os.environ.get("IC_DUCKDB_MEMORY_LIMIT")
@@ -56,6 +61,46 @@ def configure_duckdb(con: duckdb.DuckDBPyConnection, temp_dir: Path) -> None:
 def scalar(con: duckdb.DuckDBPyConnection, query: str) -> int:
     value = con.execute(query).fetchone()[0]
     return 0 if value is None else int(value)
+
+
+def materialize_yearly_partition_files(
+    partition_dir: Path,
+    output_dir: Path,
+    temp_dir: Path,
+) -> list[Path]:
+    written_files = []
+    combine_con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb(combine_con, temp_dir)
+        for partition_path in sorted(partition_dir.glob("PYEAR=*")):
+            if not partition_path.is_dir():
+                continue
+            pyear = partition_path.name.split("=", 1)[1]
+            parquet_files = sorted(partition_path.glob("*.parquet"))
+            output_file = output_dir / f"{OUTPUT_FILE_STEM}_{pyear}.parquet"
+            if not parquet_files:
+                raise RuntimeError(f"No parquet files found for {partition_path}")
+            if len(parquet_files) == 1:
+                shutil.move(str(parquet_files[0]), output_file)
+            else:
+                print(
+                    f"Combining {len(parquet_files):,} parquet part files for "
+                    f"PYEAR={pyear}"
+                )
+                combine_con.execute(
+                    f"""
+                    COPY (
+                        SELECT *
+                        FROM read_parquet({parquet_list_sql(parquet_files)})
+                    )
+                    TO {sql_literal(output_file)}
+                    (FORMAT PARQUET, COMPRESSION ZSTD)
+                    """
+                )
+            written_files.append(output_file)
+    finally:
+        combine_con.close()
+    return written_files
 
 
 def check_paths(input_file: Path, output_dir: Path, overwrite: bool) -> None:
@@ -115,20 +160,11 @@ def split_analysis_sample(
     finally:
         con.close()
 
-    written_files = []
-    for partition_path in sorted(partition_dir.glob("PYEAR=*")):
-        if not partition_path.is_dir():
-            continue
-        pyear = partition_path.name.split("=", 1)[1]
-        parquet_files = sorted(partition_path.glob("*.parquet"))
-        if len(parquet_files) != 1:
-            raise RuntimeError(
-                f"Expected one parquet file for {partition_path}, "
-                f"found {len(parquet_files)}"
-            )
-        output_file = output_dir / f"{OUTPUT_FILE_STEM}_{pyear}.parquet"
-        shutil.move(str(parquet_files[0]), output_file)
-        written_files.append(output_file)
+    written_files = materialize_yearly_partition_files(
+        partition_dir,
+        output_dir,
+        temp_dir,
+    )
 
     if len(written_files) != n_years:
         raise RuntimeError(
