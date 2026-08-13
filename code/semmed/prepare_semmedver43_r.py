@@ -230,6 +230,8 @@ def check_outputs(output_files: list[Path], overwrite: bool) -> None:
 def source_scan_sql(path: Path, columns: list[str]) -> str:
     column_spec = ", ".join(f"'{column}': 'VARCHAR'" for column in columns)
     # SemMedDB source rows can contain backslash-escaped quotes, e.g. \"U\".
+    # Literal \N values are normalized after reading because DuckDB does not
+    # allow the escape character to appear inside the CSV null marker.
     return (
         "read_csv("
         f"{sql_literal(path)}, "
@@ -237,11 +239,18 @@ def source_scan_sql(path: Path, columns: list[str]) -> str:
         f"columns={{{column_spec}}}, "
         "delim=',', "
         "quote='\"', "
-        "escape='\\', "
-        "nullstr='\\\\N', "
+        "escape=chr(92), "
         "sample_size=-1, "
         f"compression='{compression_for_path(path)}'"
         ")"
+    )
+
+
+def normalize_source_select_sql(alias: str, columns: list[str]) -> str:
+    null_marker = "chr(92) || 'N'"
+    return ", ".join(
+        f"NULLIF({alias}.{column}, {null_marker}) AS {column}"
+        for column in columns
     )
 
 
@@ -303,8 +312,11 @@ def create_input_tables(
 ) -> None:
     print(f"Reading citations from {citations_file}")
     con.execute(
-        "CREATE TEMP TABLE citations_raw AS "
-        f"SELECT * FROM {source_scan_sql(citations_file, CITATION_COLUMNS)}"
+        f"""
+        CREATE TEMP TABLE citations_raw AS
+        SELECT {normalize_source_select_sql("C", CITATION_COLUMNS)}
+        FROM {source_scan_sql(citations_file, CITATION_COLUMNS)} AS C
+        """
     )
 
     conflicting_pmids = int_scalar(
@@ -395,7 +407,10 @@ def create_input_tables(
                 OR NULLIF(trim(split_part(P.SUBJECT_CUI, '|', 1)), '') IS NULL
                 OR NULLIF(trim(split_part(P.OBJECT_CUI, '|', 1)), '') IS NULL
             ) AS missing_required_analytic_key
-        FROM {source_scan_sql(predication_file, PREDICATION_COLUMNS)} AS P
+        FROM (
+            SELECT {normalize_source_select_sql("R", PREDICATION_COLUMNS)}
+            FROM {source_scan_sql(predication_file, PREDICATION_COLUMNS)} AS R
+        ) AS P
         LEFT JOIN citation_map AS C
             ON P.PMID = C.PMID
         """
