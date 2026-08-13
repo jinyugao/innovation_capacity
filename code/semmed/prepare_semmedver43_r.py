@@ -240,6 +240,7 @@ def source_scan_sql(path: Path, columns: list[str]) -> str:
         "delim=',', "
         "quote='\"', "
         "escape=chr(92), "
+        "encoding='latin-1', "
         "sample_size=-1, "
         f"compression='{compression_for_path(path)}'"
         ")"
