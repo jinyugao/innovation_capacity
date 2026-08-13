@@ -229,6 +229,7 @@ def check_outputs(output_files: list[Path], overwrite: bool) -> None:
 
 def source_scan_sql(path: Path, columns: list[str]) -> str:
     column_spec = ", ".join(f"'{column}': 'VARCHAR'" for column in columns)
+    # SemMedDB source rows can contain backslash-escaped quotes, e.g. \"U\".
     return (
         "read_csv("
         f"{sql_literal(path)}, "
@@ -236,7 +237,7 @@ def source_scan_sql(path: Path, columns: list[str]) -> str:
         f"columns={{{column_spec}}}, "
         "delim=',', "
         "quote='\"', "
-        "escape='\"', "
+        "escape='\\', "
         "nullstr='\\\\N', "
         "sample_size=-1, "
         f"compression='{compression_for_path(path)}'"
