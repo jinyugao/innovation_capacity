@@ -283,7 +283,14 @@ def create_country_tables(
             trim(pmid_country_codes_full_counting)
                 AS pmid_country_codes_full_counting,
             TRY_CAST(n_countries_for_pmid AS BIGINT) AS n_countries_for_pmid
-        FROM read_csv_auto({sql_literal(country_list_file)}, all_varchar=true)
+        FROM read_csv(
+            {sql_literal(country_list_file)},
+            header=true,
+            all_varchar=true,
+            delim=',',
+            quote='"',
+            escape='"'
+        )
         WHERE
             {pmid_expr} != ''
             AND pmid_country_codes_full_counting IS NOT NULL
@@ -308,7 +315,14 @@ def create_country_tables(
         SELECT
             trim(institution_country_code) AS country_code,
             MIN(trim(institution_country)) AS country_name
-        FROM read_csv_auto({sql_literal(country_long_file)}, all_varchar=true)
+        FROM read_csv(
+            {sql_literal(country_long_file)},
+            header=true,
+            all_varchar=true,
+            delim=',',
+            quote='"',
+            escape='"'
+        )
         WHERE
             institution_country_code IS NOT NULL
             AND trim(institution_country_code) != ''
