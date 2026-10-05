@@ -12,3 +12,7 @@ __pycache__/
 *.parquet
 *.pkl
 *.zip
+
+# Retained locally as reference material, but not published in this repository.
+/code/link_prediction/
+/jobs/link_prediction/
