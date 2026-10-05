@@ -9,12 +9,18 @@ create duplicate PMID-country rows.
 from __future__ import annotations
 
 from collections import defaultdict
+import os
 from pathlib import Path
 
 import pandas as pd
 
 
-OPENALEX_DIR = Path("/xdisk/sebratt/jinyugao/data/products/openalex/flattened_snapshot_2025")
+DEFAULT_OPENALEX_DIR = Path(
+    "/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025"
+)
+OPENALEX_DIR = Path(
+    os.environ.get("IC_OPENALEX_PROCESSED_DIR", DEFAULT_OPENALEX_DIR)
+).expanduser()
 INPUT_FILE = OPENALEX_DIR / "openalex_authorships_institutions_workids_pmid.csv.gz"
 OUTPUT_FILE = OPENALEX_DIR / "openalex_pmid_country_full_counting.csv.gz"
 

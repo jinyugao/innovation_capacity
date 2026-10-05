@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 import pandas as pd
 
 
-OPENALEX_DIR = Path("/xdisk/sebratt/jinyugao/data/products/openalex/flattened_snapshot_2025")
+DEFAULT_OPENALEX_DIR = Path(
+    "/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025"
+)
+OPENALEX_DIR = Path(
+    os.environ.get("IC_OPENALEX_PROCESSED_DIR", DEFAULT_OPENALEX_DIR)
+).expanduser()
 
 WORKS_IDS_FILE = OPENALEX_DIR / "openalex_works_ids.csv.gz"
 AUTHORSHIPS_FILE = OPENALEX_DIR / "openalex_works_authorships.csv.gz"

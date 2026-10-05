@@ -10,8 +10,17 @@ import os
 from pathlib import Path
 
 
-SNAPSHOT_DIR = Path("/contrib/datasets/openalex-snapshot")
-OUTPUT_DIR = Path("/xdisk/sebratt/jinyugao/data/products/openalex/flattened_snapshot_2025")
+DEFAULT_SNAPSHOT_DIR = Path("/contrib/datasets/openalex-snapshot")
+DEFAULT_OUTPUT_DIR = Path(
+    "/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025"
+)
+
+SNAPSHOT_DIR = Path(
+    os.environ.get("IC_OPENALEX_SNAPSHOT_DIR", DEFAULT_SNAPSHOT_DIR)
+).expanduser()
+OUTPUT_DIR = Path(
+    os.environ.get("IC_OPENALEX_PROCESSED_DIR", DEFAULT_OUTPUT_DIR)
+).expanduser()
 
 FILES_PER_ENTITY = int(os.environ.get("OPENALEX_DEMO_FILES_PER_ENTITY", "0"))
 

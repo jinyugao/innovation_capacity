@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=build_openalex_pmid_country_full_counting_lists
-#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_pmid_country_full_counting_lists_%j.out
-#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_pmid_country_full_counting_lists_%j.err
+#SBATCH --output=/xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/openalex/build_openalex_pmid_country_full_counting_lists_%j.out
+#SBATCH --error=/xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/openalex/build_openalex_pmid_country_full_counting_lists_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -10,19 +10,25 @@
 #SBATCH --account=sebratt
 #SBATCH --partition=standard
 
-PYTHON=/xdisk/sebratt/jinyugao/envs/innovation_capacity/bin/python
+set -euo pipefail
 
-if [ ! -x "$PYTHON" ]; then
-    echo "Missing Python environment: $PYTHON"
-    echo "Create it with: python3 -m venv /xdisk/sebratt/jinyugao/envs/innovation_capacity"
-    echo "Then install dependencies with: /xdisk/sebratt/jinyugao/envs/innovation_capacity/bin/pip install pandas"
+export IC_PROJECT_ROOT="${IC_PROJECT_ROOT:-/xdisk/sebratt/jinyugao/research/projects/innovation_capacity}"
+export IC_REPO_ROOT="${IC_REPO_ROOT:-/xdisk/sebratt/jinyugao/research/repos/innovation_capacity}"
+export IC_PYTHON="${IC_PYTHON:-/xdisk/sebratt/jinyugao/research/envs/innovation_capacity/bin/python}"
+export IC_OPENALEX_PROCESSED_DIR="${IC_OPENALEX_PROCESSED_DIR:-/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025}"
+
+if [ ! -x "$IC_PYTHON" ]; then
+    echo "Missing Python environment: $IC_PYTHON"
+    echo "Run scripts/setup_hpc_python_env.sh after cloning the repository."
     exit 1
 fi
 
-REPO_DIR=/xdisk/sebratt/jinyugao/repos/innovation_capacity
-LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs
+LOG_DIR="$IC_PROJECT_ROOT/logs/openalex"
 
 mkdir -p "$LOG_DIR"
 
-cd "$REPO_DIR"
-"$PYTHON" -u code/openalex/build_openalex_pmid_country_full_counting_lists.py
+cd "$IC_REPO_ROOT"
+
+echo "IC_OPENALEX_PROCESSED_DIR=$IC_OPENALEX_PROCESSED_DIR"
+
+"$IC_PYTHON" -u code/openalex/build_openalex_pmid_country_full_counting_lists.py

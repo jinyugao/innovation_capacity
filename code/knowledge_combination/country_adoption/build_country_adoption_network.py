@@ -28,7 +28,7 @@ DEFAULT_PROJECT_ROOT = Path(
     "/xdisk/sebratt/jinyugao/research/projects/innovation_capacity"
 )
 DEFAULT_OPENALEX_PROCESSED_DIR = Path(
-    "/home/u23/jinyugao/research/data/processed/openalex"
+    "/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025"
 )
 
 BASE_YEAR = 1980
