@@ -93,12 +93,22 @@ PY
 
 if [[ "$DOWNLOAD_BIOMEDBERT" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
     "$PYTHON" - <<PY
-from transformers import AutoModel, AutoTokenizer
+from huggingface_hub import snapshot_download
 
 model_name = "$MODEL_NAME"
 print(f"Downloading or checking cached BiomedBERT model: {model_name}")
-AutoTokenizer.from_pretrained(model_name)
-AutoModel.from_pretrained(model_name)
+snapshot_download(
+    repo_id=model_name,
+    allow_patterns=[
+        "config.json",
+        "model.safetensors",
+        "pytorch_model.bin",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.txt",
+    ],
+)
 print("BiomedBERT model cache is ready.")
 PY
 else
