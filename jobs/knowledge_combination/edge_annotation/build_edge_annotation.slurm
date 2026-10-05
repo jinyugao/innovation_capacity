@@ -9,7 +9,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --account=sebratt
 #SBATCH --partition=standard
-#SBATCH --array=0-39
+#SBATCH --array=0-43
 
 set -euo pipefail
 

@@ -32,7 +32,8 @@ DEFAULT_PROJECT_ROOT = Path(
 )
 
 BASE_YEAR = 1980
-N_YEARS = 40
+END_YEAR = 2023
+N_YEARS = END_YEAR - BASE_YEAR + 1
 PRIOR_WINDOW_YEARS = 5
 
 SEMMED_YEARLY_SUBDIR = Path("data/processed/semmedVER43_R/semmeddb_analysis_sample")
