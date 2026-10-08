@@ -7,6 +7,7 @@ import glob
 import gzip
 import json
 import os
+from contextlib import ExitStack
 from pathlib import Path
 
 
@@ -23,10 +24,12 @@ OUTPUT_DIR = Path(
 ).expanduser()
 
 FILES_PER_ENTITY = int(os.environ.get("OPENALEX_DEMO_FILES_PER_ENTITY", "0"))
+WRITE_REFERENCED_WORKS = os.environ.get(
+    "IC_OPENALEX_WRITE_REFERENCED_WORKS", "0"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 OUTPUT_FILES = {
     "institutions": OUTPUT_DIR / "openalex_institutions.csv.gz",
-    "institutions_geo": OUTPUT_DIR / "openalex_institutions_geo.csv.gz",
     "works_ids": OUTPUT_DIR / "openalex_works_ids.csv.gz",
     "works_authorships": OUTPUT_DIR / "openalex_works_authorships.csv.gz",
     "works_referenced_works": OUTPUT_DIR / "openalex_works_referenced_works.csv.gz",
@@ -38,21 +41,17 @@ INSTITUTIONS_COLUMNS = [
     "ror",
     "display_name",
     "country_code",
+    "geo_country_code",
+    "country",
+    "city",
+    "geonames_city_id",
+    "region",
+    "latitude",
+    "longitude",
     "type",
     "works_count",
     "cited_by_count",
     "updated_date",
-]
-
-INSTITUTIONS_GEO_COLUMNS = [
-    "institution_id",
-    "city",
-    "geonames_city_id",
-    "region",
-    "country_code",
-    "country",
-    "latitude",
-    "longitude",
 ]
 
 WORKS_IDS_COLUMNS = [
@@ -105,13 +104,8 @@ def iter_snapshot_files(entity: str):
 def flatten_institutions() -> None:
     with gzip.open(
         OUTPUT_FILES["institutions"], "wt", encoding="utf-8", newline=""
-    ) as institutions_csv, gzip.open(
-        OUTPUT_FILES["institutions_geo"], "wt", encoding="utf-8", newline=""
-    ) as institutions_geo_csv:
+    ) as institutions_csv:
         institutions_writer = init_writer(institutions_csv, INSTITUTIONS_COLUMNS)
-        institutions_geo_writer = init_writer(
-            institutions_geo_csv, INSTITUTIONS_GEO_COLUMNS
-        )
 
         seen_institution_ids = set()
 
@@ -128,6 +122,7 @@ def flatten_institutions() -> None:
                         continue
 
                     seen_institution_ids.add(institution_id)
+                    institution_geo = institution.get("geo") or {}
 
                     institutions_writer.writerow(
                         {
@@ -135,6 +130,15 @@ def flatten_institutions() -> None:
                             "ror": institution.get("ror"),
                             "display_name": institution.get("display_name"),
                             "country_code": institution.get("country_code"),
+                            "geo_country_code": institution_geo.get("country_code"),
+                            "country": institution_geo.get("country"),
+                            "city": institution_geo.get("city"),
+                            "geonames_city_id": institution_geo.get(
+                                "geonames_city_id"
+                            ),
+                            "region": institution_geo.get("region"),
+                            "latitude": institution_geo.get("latitude"),
+                            "longitude": institution_geo.get("longitude"),
                             "type": institution.get("type"),
                             "works_count": institution.get("works_count"),
                             "cited_by_count": institution.get("cited_by_count"),
@@ -142,46 +146,53 @@ def flatten_institutions() -> None:
                         }
                     )
 
-                    institution_geo = institution.get("geo") or {}
-                    if institution_geo:
-                        institutions_geo_writer.writerow(
-                            {
-                                "institution_id": institution_id,
-                                "city": institution_geo.get("city"),
-                                "geonames_city_id": institution_geo.get(
-                                    "geonames_city_id"
-                                ),
-                                "region": institution_geo.get("region"),
-                                "country_code": institution_geo.get("country_code"),
-                                "country": institution_geo.get("country"),
-                                "latitude": institution_geo.get("latitude"),
-                                "longitude": institution_geo.get("longitude"),
-                            }
-                        )
-
         print(f"Flattened {len(seen_institution_ids):,} institutions.")
 
 
 def flatten_works() -> None:
-    with gzip.open(
-        OUTPUT_FILES["works_ids"], "wt", encoding="utf-8", newline=""
-    ) as works_ids_csv, gzip.open(
-        OUTPUT_FILES["works_authorships"], "wt", encoding="utf-8", newline=""
-    ) as works_authorships_csv, gzip.open(
-        OUTPUT_FILES["works_referenced_works"], "wt", encoding="utf-8", newline=""
-    ) as works_referenced_works_csv, gzip.open(
-        OUTPUT_FILES["works_publication_year"], "wt", encoding="utf-8", newline=""
-    ) as works_publication_year_csv:
+    with ExitStack() as stack:
+        works_ids_csv = stack.enter_context(
+            gzip.open(
+                OUTPUT_FILES["works_ids"], "wt", encoding="utf-8", newline=""
+            )
+        )
+        works_authorships_csv = stack.enter_context(
+            gzip.open(
+                OUTPUT_FILES["works_authorships"],
+                "wt",
+                encoding="utf-8",
+                newline="",
+            )
+        )
+        works_publication_year_csv = stack.enter_context(
+            gzip.open(
+                OUTPUT_FILES["works_publication_year"],
+                "wt",
+                encoding="utf-8",
+                newline="",
+            )
+        )
+
         works_ids_writer = init_writer(works_ids_csv, WORKS_IDS_COLUMNS)
         works_authorships_writer = init_writer(
             works_authorships_csv, WORKS_AUTHORSHIPS_COLUMNS
         )
-        works_referenced_works_writer = init_writer(
-            works_referenced_works_csv, WORKS_REFERENCED_WORKS_COLUMNS
-        )
         works_publication_year_writer = init_writer(
             works_publication_year_csv, WORKS_PUBLICATION_YEAR_COLUMNS
         )
+        works_referenced_works_writer = None
+        if WRITE_REFERENCED_WORKS:
+            works_referenced_works_csv = stack.enter_context(
+                gzip.open(
+                    OUTPUT_FILES["works_referenced_works"],
+                    "wt",
+                    encoding="utf-8",
+                    newline="",
+                )
+            )
+            works_referenced_works_writer = init_writer(
+                works_referenced_works_csv, WORKS_REFERENCED_WORKS_COLUMNS
+            )
 
         works_seen = 0
         authorship_rows = 0
@@ -250,23 +261,28 @@ def flatten_works() -> None:
                             )
                             authorship_rows += 1
 
-                    for referenced_work in work.get("referenced_works") or []:
-                        if referenced_work:
-                            works_referenced_works_writer.writerow(
-                                {
-                                    "work_id": work_id,
-                                    "referenced_work_id": referenced_work,
-                                }
-                            )
-                            referenced_work_rows += 1
+                    if works_referenced_works_writer is not None:
+                        for referenced_work in work.get("referenced_works") or []:
+                            if referenced_work:
+                                works_referenced_works_writer.writerow(
+                                    {
+                                        "work_id": work_id,
+                                        "referenced_work_id": referenced_work,
+                                    }
+                                )
+                                referenced_work_rows += 1
 
         print(f"Flattened {works_seen:,} works.")
         print(f"Wrote {authorship_rows:,} authorship rows.")
-        print(f"Wrote {referenced_work_rows:,} referenced-work rows.")
+        if WRITE_REFERENCED_WORKS:
+            print(f"Wrote {referenced_work_rows:,} referenced-work rows.")
+        else:
+            print("Skipped referenced-work output.")
 
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Write referenced works: {WRITE_REFERENCED_WORKS}")
     flatten_institutions()
     flatten_works()
     print("OpenAlex flattening complete.")

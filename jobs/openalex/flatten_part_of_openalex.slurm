@@ -17,6 +17,7 @@ export IC_REPO_ROOT="${IC_REPO_ROOT:-/xdisk/sebratt/jinyugao/research/repos/inno
 export IC_PYTHON="${IC_PYTHON:-/xdisk/sebratt/jinyugao/research/envs/innovation_capacity/bin/python}"
 export IC_OPENALEX_SNAPSHOT_DIR="${IC_OPENALEX_SNAPSHOT_DIR:-/contrib/datasets/openalex-snapshot}"
 export IC_OPENALEX_PROCESSED_DIR="${IC_OPENALEX_PROCESSED_DIR:-/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025}"
+export IC_OPENALEX_WRITE_REFERENCED_WORKS="${IC_OPENALEX_WRITE_REFERENCED_WORKS:-0}"
 
 if [ ! -x "$IC_PYTHON" ]; then
     echo "Missing Python environment: $IC_PYTHON"
@@ -32,5 +33,6 @@ cd "$IC_REPO_ROOT"
 
 echo "IC_OPENALEX_SNAPSHOT_DIR=$IC_OPENALEX_SNAPSHOT_DIR"
 echo "IC_OPENALEX_PROCESSED_DIR=$IC_OPENALEX_PROCESSED_DIR"
+echo "IC_OPENALEX_WRITE_REFERENCED_WORKS=$IC_OPENALEX_WRITE_REFERENCED_WORKS"
 
 "$IC_PYTHON" -u code/openalex/flatten_part_of_openalex.py
