@@ -17,6 +17,8 @@ export IC_REPO_ROOT="${IC_REPO_ROOT:-/xdisk/sebratt/jinyugao/research/repos/inno
 export IC_PYTHON="${IC_PYTHON:-/xdisk/sebratt/jinyugao/research/envs/innovation_capacity/bin/python}"
 export IC_OPENALEX_FLATTENED_DIR="${IC_OPENALEX_FLATTENED_DIR:-/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025}"
 export IC_OPENALEX_INSTITUTION_DIR="${IC_OPENALEX_INSTITUTION_DIR:-/xdisk/sebratt/jinyugao/research/data/processed/openalex/institution}"
+export IC_DUCKDB_THREADS="${IC_DUCKDB_THREADS:-8}"
+export IC_DUCKDB_MEMORY_LIMIT="${IC_DUCKDB_MEMORY_LIMIT:-100GB}"
 
 if [ ! -x "$IC_PYTHON" ]; then
     echo "Missing Python environment: $IC_PYTHON"
@@ -32,5 +34,8 @@ cd "$IC_REPO_ROOT"
 
 echo "IC_OPENALEX_FLATTENED_DIR=$IC_OPENALEX_FLATTENED_DIR"
 echo "IC_OPENALEX_INSTITUTION_DIR=$IC_OPENALEX_INSTITUTION_DIR"
+echo "IC_DUCKDB_THREADS=$IC_DUCKDB_THREADS"
+echo "IC_DUCKDB_MEMORY_LIMIT=$IC_DUCKDB_MEMORY_LIMIT"
+echo "IC_OPENALEX_INSTITUTION_OVERWRITE=${IC_OPENALEX_INSTITUTION_OVERWRITE:-0}"
 
 "$IC_PYTHON" -u code/openalex/institution/build_openalex_authorships_institutions_workids_pmid.py

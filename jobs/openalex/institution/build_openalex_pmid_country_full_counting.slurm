@@ -17,7 +17,7 @@ export IC_REPO_ROOT="${IC_REPO_ROOT:-/xdisk/sebratt/jinyugao/research/repos/inno
 export IC_PYTHON="${IC_PYTHON:-/xdisk/sebratt/jinyugao/research/envs/innovation_capacity/bin/python}"
 export IC_OPENALEX_INSTITUTION_DIR="${IC_OPENALEX_INSTITUTION_DIR:-/xdisk/sebratt/jinyugao/research/data/processed/openalex/institution}"
 export IC_DUCKDB_THREADS="${IC_DUCKDB_THREADS:-4}"
-export IC_DUCKDB_MEMORY_LIMIT="${IC_DUCKDB_MEMORY_LIMIT:-110GB}"
+export IC_DUCKDB_MEMORY_LIMIT="${IC_DUCKDB_MEMORY_LIMIT:-100GB}"
 
 if [ ! -x "$IC_PYTHON" ]; then
     echo "Missing Python environment: $IC_PYTHON"

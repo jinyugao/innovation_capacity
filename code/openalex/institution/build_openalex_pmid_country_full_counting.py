@@ -27,7 +27,7 @@ OVERWRITE = os.environ.get("IC_OPENALEX_INSTITUTION_OVERWRITE", "0").strip().low
     "on",
 }
 DUCKDB_THREADS = int(os.environ.get("IC_DUCKDB_THREADS", "4"))
-DUCKDB_MEMORY_LIMIT = os.environ.get("IC_DUCKDB_MEMORY_LIMIT", "110GB")
+DUCKDB_MEMORY_LIMIT = os.environ.get("IC_DUCKDB_MEMORY_LIMIT", "4GB")
 
 
 def sql_literal(value: str | Path) -> str:
@@ -46,8 +46,18 @@ def check_output(path: Path, overwrite: bool) -> None:
             "Output file already exists. Set IC_OPENALEX_INSTITUTION_OVERWRITE=1 "
             f"to replace it:\n{path}"
         )
-    if path.exists() and overwrite:
-        path.unlink()
+
+
+def make_temporary_output(path: Path) -> Path:
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    temporary_path.unlink()
+    return temporary_path
 
 
 def int_scalar(con: duckdb.DuckDBPyConnection, query: str) -> int:
@@ -78,32 +88,41 @@ def build_pmid_country_table(
             nullif(trim(CAST(author_id AS VARCHAR)), '') AS author_id,
             nullif(trim(CAST(institution_id AS VARCHAR)), '') AS institution_id,
             CASE
-                WHEN (
-                    institution_country_code IS NULL
-                    OR trim(CAST(institution_country_code AS VARCHAR)) = ''
-                )
+                WHEN nullif(
+                    trim(CAST(institution_country_code AS VARCHAR)),
+                    ''
+                ) IS NULL
                 AND lower(trim(CAST(institution_country AS VARCHAR))) = 'namibia'
                     THEN 'NA'
-                ELSE trim(CAST(institution_country_code AS VARCHAR))
+                ELSE upper(
+                    nullif(
+                        trim(CAST(institution_country_code AS VARCHAR)),
+                        ''
+                    )
+                )
             END AS institution_country_code,
-            coalesce(trim(CAST(institution_country AS VARCHAR)), '')
+            nullif(trim(CAST(institution_country AS VARCHAR)), '')
                 AS institution_country
         FROM read_parquet({sql_literal(input_file)})
         """
     )
 
-    input_rows = int_scalar(con, "SELECT COUNT(*) FROM authorships_clean")
-    kept_rows = int_scalar(
-        con,
-        """
-        SELECT COUNT(*)
-        FROM authorships_clean
-        WHERE
-            pmid IS NOT NULL
-            AND pmid != ''
-            AND institution_country_code IS NOT NULL
-            AND institution_country_code != ''
-        """,
+    input_rows, kept_rows = (
+        int(value)
+        for value in con.execute(
+            """
+            SELECT
+                COUNT(*) AS input_rows,
+                COUNT(*) FILTER (
+                    WHERE
+                        pmid IS NOT NULL
+                        AND pmid != ''
+                        AND institution_country_code IS NOT NULL
+                        AND institution_country_code != ''
+                ) AS kept_rows
+            FROM authorships_clean
+            """,
+        ).fetchone()
     )
 
     con.execute(
@@ -115,7 +134,9 @@ def build_pmid_country_table(
                 string_agg(
                     DISTINCT institution_country,
                     '; ' ORDER BY institution_country
-                ) FILTER (WHERE institution_country != '') AS institution_country,
+                ) FILTER (
+                    WHERE institution_country IS NOT NULL
+                ) AS institution_country,
                 CAST(1 AS BIGINT) AS pmid_country_weight,
                 COUNT(DISTINCT work_id) AS n_work_ids_for_pmid_country,
                 COUNT(DISTINCT author_id) AS n_authors_for_pmid_country,
@@ -136,13 +157,50 @@ def build_pmid_country_table(
         """
     )
 
-    output_rows = int_scalar(
-        con,
-        f"SELECT COUNT(*) FROM read_parquet({sql_literal(output_file)})",
+    output_rows, lowercase_country_codes, namibia_rows = (
+        int(value)
+        for value in con.execute(
+            f"""
+            SELECT
+                COUNT(*) AS output_rows,
+                COUNT(*) FILTER (
+                    WHERE institution_country_code
+                        != upper(institution_country_code)
+                ) AS lowercase_country_codes,
+                COUNT(*) FILTER (
+                    WHERE institution_country_code = 'NA'
+                ) AS namibia_rows
+            FROM read_parquet({sql_literal(output_file)})
+            """
+        ).fetchone()
     )
+    duplicate_output_keys = int_scalar(
+        con,
+        f"""
+        SELECT COUNT(*)
+        FROM (
+            SELECT pmid, institution_country_code
+            FROM read_parquet({sql_literal(output_file)})
+            GROUP BY pmid, institution_country_code
+            HAVING COUNT(*) > 1
+        )
+        """,
+    )
+    if duplicate_output_keys:
+        raise RuntimeError(
+            "PMID-country output contains duplicate keys: "
+            f"{duplicate_output_keys:,}."
+        )
+    if lowercase_country_codes:
+        raise RuntimeError(
+            "PMID-country output contains non-uppercase country codes: "
+            f"{lowercase_country_codes:,}."
+        )
+
     print(f"Input authorship rows: {input_rows:,}")
     print(f"Rows with PMID and country code: {kept_rows:,}")
     print(f"Unique PMID-country rows written: {output_rows:,}")
+    print(f"PMID-country rows with Namibia country code NA: {namibia_rows:,}")
 
 
 def main() -> None:
@@ -150,6 +208,8 @@ def main() -> None:
     print(f"Input parquet: {INPUT_FILE}")
     print(f"Output parquet: {OUTPUT_FILE}")
     print(f"Overwrite output: {OVERWRITE}")
+    print(f"DuckDB threads: {DUCKDB_THREADS}")
+    print(f"DuckDB memory limit: {DUCKDB_MEMORY_LIMIT}")
     check_input(INPUT_FILE)
     check_output(OUTPUT_FILE, OVERWRITE)
 
@@ -159,16 +219,21 @@ def main() -> None:
             dir=INSTITUTION_DIR,
         )
     )
+    temporary_output = make_temporary_output(OUTPUT_FILE)
     print(f"Using DuckDB temp directory: {temp_dir}")
+    print(f"Writing temporary output: {temporary_output}")
 
     con = duckdb.connect(database=":memory:")
     try:
         configure_duckdb(con, temp_dir)
-        build_pmid_country_table(con, INPUT_FILE, OUTPUT_FILE)
+        build_pmid_country_table(con, INPUT_FILE, temporary_output)
+        os.replace(temporary_output, OUTPUT_FILE)
     finally:
         con.close()
+        temporary_output.unlink(missing_ok=True)
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+    print(f"Saved PMID-country full-counting table to {OUTPUT_FILE}")
     print("OpenAlex PMID-country full counting complete.")
 
 
