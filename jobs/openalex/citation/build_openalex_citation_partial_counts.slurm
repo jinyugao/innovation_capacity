@@ -26,4 +26,4 @@ LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" -u code/openalex/build_openalex_citation_partial_counts.py
+"$PYTHON" -u code/openalex/citation/build_openalex_citation_partial_counts.py

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Archived legacy CSV workflow; not part of the active run order.
 #SBATCH --job-name=build_openalex_pmid_country_full_counting_lists
 #SBATCH --output=/xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/openalex/build_openalex_pmid_country_full_counting_lists_%j.out
 #SBATCH --error=/xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/openalex/build_openalex_pmid_country_full_counting_lists_%j.err
@@ -31,4 +32,4 @@ cd "$IC_REPO_ROOT"
 
 echo "IC_OPENALEX_PROCESSED_DIR=$IC_OPENALEX_PROCESSED_DIR"
 
-"$IC_PYTHON" -u code/openalex/build_openalex_pmid_country_full_counting_lists.py
+"$IC_PYTHON" -u code/openalex/archive/build_openalex_pmid_country_full_counting_lists.py

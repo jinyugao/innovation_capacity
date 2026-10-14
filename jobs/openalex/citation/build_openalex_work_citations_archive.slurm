@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=combine_openalex_citation_partial_counts
-#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/combine_openalex_citation_partial_counts_%j.out
-#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/combine_openalex_citation_partial_counts_%j.err
+#SBATCH --job-name=build_openalex_work_citations_archive
+#SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_work_citations_archive_%j.out
+#SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_work_citations_archive_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=256gb
 #SBATCH --time=72:00:00
 #SBATCH --account=sebratt
@@ -20,9 +20,9 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 REPO_DIR=/xdisk/sebratt/jinyugao/repos/innovation_capacity
-LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs
+LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_work_citations_archive
 
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" -u code/openalex/combine_openalex_citation_partial_counts.py
+"$PYTHON" -u code/openalex/citation/build_openalex_work_citations_archive.py

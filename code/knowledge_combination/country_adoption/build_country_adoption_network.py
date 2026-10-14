@@ -27,8 +27,8 @@ except ImportError as exc:  # pragma: no cover - exercised on HPC if missing.
 DEFAULT_PROJECT_ROOT = Path(
     "/xdisk/sebratt/jinyugao/research/projects/innovation_capacity"
 )
-DEFAULT_OPENALEX_PROCESSED_DIR = Path(
-    "/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025"
+DEFAULT_OPENALEX_INSTITUTION_DIR = Path(
+    "/xdisk/sebratt/jinyugao/research/data/processed/openalex/institution"
 )
 
 BASE_YEAR = 1980
@@ -45,8 +45,7 @@ EDGE_TRANSITION_FILE_STEM = "edge_transition"
 OUTPUT_FILE_STEM = "country_adoption"
 SUMMARY_FILE_STEM = "country_adoption_summary"
 
-COUNTRY_LIST_FILE_NAME = "openalex_pmid_country_full_counting_lists.csv.gz"
-COUNTRY_LONG_FILE_NAME = "openalex_pmid_country_full_counting.csv.gz"
+COUNTRY_FILE_NAME = "openalex_pmid_country_full_counting.parquet"
 
 PMID_COLUMN = "PMID"
 SUBJECT_CUI_COLUMN = "subject_cui_primary"
@@ -224,7 +223,7 @@ def normalize_pmid_sql(column: str) -> str:
 
 def check_inputs(
     project_root: Path,
-    openalex_processed_dir: Path,
+    openalex_institution_dir: Path,
     focal_year: int,
 ) -> list[Path]:
     transition_file = edge_transition_file(project_root, focal_year)
@@ -232,11 +231,8 @@ def check_inputs(
         edge_annotation_file(project_root, year)
         for year in future_years_for_focal_year(focal_year)
     ]
-    country_files = [
-        openalex_processed_dir / COUNTRY_LIST_FILE_NAME,
-        openalex_processed_dir / COUNTRY_LONG_FILE_NAME,
-    ]
-    input_files = [transition_file, *future_annotation_files, *country_files]
+    country_file = openalex_institution_dir / COUNTRY_FILE_NAME
+    input_files = [transition_file, *future_annotation_files, country_file]
     missing = [path for path in input_files if not path.exists()]
     if missing:
         missing_text = "\n".join(str(path) for path in missing)
@@ -271,30 +267,22 @@ def write_single_row_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def create_country_tables(
     con: duckdb.DuckDBPyConnection,
-    country_list_file: Path,
-    country_long_file: Path,
+    country_file: Path,
 ) -> None:
     pmid_expr = normalize_pmid_sql("pmid")
     con.execute(
         f"""
-        CREATE TEMP TABLE pmid_country_lists AS
+        CREATE TEMP TABLE pmid_country_long AS
         SELECT
             {pmid_expr} AS pmid_normalized,
-            trim(pmid_country_codes_full_counting)
-                AS pmid_country_codes_full_counting,
-            TRY_CAST(n_countries_for_pmid AS BIGINT) AS n_countries_for_pmid
-        FROM read_csv(
-            {sql_literal(country_list_file)},
-            header=true,
-            all_varchar=true,
-            delim=',',
-            quote='"',
-            escape='"'
-        )
+            trim(CAST(institution_country_code AS VARCHAR)) AS country_code,
+            coalesce(trim(CAST(institution_country AS VARCHAR)), '')
+                AS country_name
+        FROM read_parquet({sql_literal(country_file)})
         WHERE
             {pmid_expr} != ''
-            AND pmid_country_codes_full_counting IS NOT NULL
-            AND trim(pmid_country_codes_full_counting) != ''
+            AND institution_country_code IS NOT NULL
+            AND trim(CAST(institution_country_code AS VARCHAR)) != ''
         """
     )
     con.execute(
@@ -302,33 +290,20 @@ def create_country_tables(
         CREATE TEMP TABLE pmid_country_expanded AS
         SELECT DISTINCT
             pmid_normalized,
-            trim(country_code) AS country_code
-        FROM pmid_country_lists,
-            UNNEST(string_split(pmid_country_codes_full_counting, ';'))
-                AS countries(country_code)
-        WHERE trim(country_code) != ''
+            country_code
+        FROM pmid_country_long
         """
     )
     con.execute(
-        f"""
+        """
         CREATE TEMP TABLE country_name_lookup AS
         SELECT
-            trim(institution_country_code) AS country_code,
-            MIN(trim(institution_country)) AS country_name
-        FROM read_csv(
-            {sql_literal(country_long_file)},
-            header=true,
-            all_varchar=true,
-            delim=',',
-            quote='"',
-            escape='"'
-        )
+            country_code,
+            MIN(country_name) AS country_name
+        FROM pmid_country_long
         WHERE
-            institution_country_code IS NOT NULL
-            AND trim(institution_country_code) != ''
-            AND institution_country IS NOT NULL
-            AND trim(institution_country) != ''
-        GROUP BY trim(institution_country_code)
+            country_name != ''
+        GROUP BY country_code
         """
     )
 
@@ -897,7 +872,7 @@ def collect_summary_rows(
 
 def build_country_adoption_network(
     project_root: Path,
-    openalex_processed_dir: Path,
+    openalex_institution_dir: Path,
     focal_year: int,
     overwrite: bool,
 ) -> None:
@@ -905,11 +880,10 @@ def build_country_adoption_network(
     transition_file = edge_transition_file(project_root, focal_year)
     future_annotation_files = check_inputs(
         project_root,
-        openalex_processed_dir,
+        openalex_institution_dir,
         focal_year,
     )
-    country_list_file = openalex_processed_dir / COUNTRY_LIST_FILE_NAME
-    country_long_file = openalex_processed_dir / COUNTRY_LONG_FILE_NAME
+    country_file = openalex_institution_dir / COUNTRY_FILE_NAME
     network_output_files = [
         output_file(project_root, focal_year, category)
         for category in NETWORK_CATEGORIES
@@ -932,16 +906,11 @@ def build_country_adoption_network(
             "Future edge-annotation inputs:\n"
             + "\n".join(str(path) for path in future_annotation_files)
         )
-        print(f"OpenAlex country list input: {country_list_file}")
-        print(f"OpenAlex country long input: {country_long_file}")
+        print(f"OpenAlex PMID-country input: {country_file}")
 
-        create_country_tables(con, country_list_file, country_long_file)
+        create_country_tables(con, country_file)
         print(
-            "PMID-country list rows: "
-            f"{int_scalar(con, 'SELECT COUNT(*) FROM pmid_country_lists'):,}"
-        )
-        print(
-            "PMID-country expanded rows: "
+            "PMID-country rows: "
             f"{int_scalar(con, 'SELECT COUNT(*) FROM pmid_country_expanded'):,}"
         )
 
@@ -993,20 +962,20 @@ def build_country_adoption_network(
 
 def main() -> None:
     project_root = get_env_path("IC_PROJECT_ROOT", DEFAULT_PROJECT_ROOT)
-    openalex_processed_dir = get_env_path(
-        "IC_OPENALEX_PROCESSED_DIR",
-        DEFAULT_OPENALEX_PROCESSED_DIR,
+    openalex_institution_dir = get_env_path(
+        "IC_OPENALEX_INSTITUTION_DIR",
+        DEFAULT_OPENALEX_INSTITUTION_DIR,
     )
     focal_year = get_focal_year()
     overwrite = get_env_bool("IC_COUNTRY_ADOPTION_OVERWRITE", False)
 
     print(f"Project root: {project_root}")
-    print(f"OpenAlex processed directory: {openalex_processed_dir}")
+    print(f"OpenAlex institution directory: {openalex_institution_dir}")
     print(f"Focal year: {focal_year}")
     print(f"Overwrite outputs: {overwrite}")
     build_country_adoption_network(
         project_root,
-        openalex_processed_dir,
+        openalex_institution_dir,
         focal_year,
         overwrite,
     )

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Archived optional author-role analysis; not part of the active run order.
 #SBATCH --job-name=build_openalex_first_last_author_institutions_pmid
 #SBATCH --output=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_first_last_author_institutions_pmid/build_openalex_first_last_author_institutions_pmid_%j.out
 #SBATCH --error=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex_first_last_author_institutions_pmid/build_openalex_first_last_author_institutions_pmid_%j.err
@@ -25,4 +26,4 @@ LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs/build_openalex
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" code/openalex/build_openalex_first_last_author_institutions_pmid.py
+"$PYTHON" code/openalex/archive/build_openalex_first_last_author_institutions_pmid.py

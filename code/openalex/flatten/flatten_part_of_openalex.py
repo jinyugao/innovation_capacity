@@ -20,7 +20,7 @@ SNAPSHOT_DIR = Path(
     os.environ.get("IC_OPENALEX_SNAPSHOT_DIR", DEFAULT_SNAPSHOT_DIR)
 ).expanduser()
 OUTPUT_DIR = Path(
-    os.environ.get("IC_OPENALEX_PROCESSED_DIR", DEFAULT_OUTPUT_DIR)
+    os.environ.get("IC_OPENALEX_FLATTENED_DIR", DEFAULT_OUTPUT_DIR)
 ).expanduser()
 
 FILES_PER_ENTITY = int(os.environ.get("OPENALEX_DEMO_FILES_PER_ENTITY", "0"))

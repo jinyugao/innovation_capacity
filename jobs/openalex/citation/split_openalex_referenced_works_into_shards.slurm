@@ -25,4 +25,4 @@ LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" -u code/openalex/split_openalex_referenced_works_into_shards.py
+"$PYTHON" -u code/openalex/citation/split_openalex_referenced_works_into_shards.py

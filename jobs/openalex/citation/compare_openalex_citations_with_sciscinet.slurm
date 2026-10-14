@@ -30,4 +30,4 @@ LOG_DIR=/xdisk/sebratt/jinyugao/projects/innovation_capacity/logs
 mkdir -p "$LOG_DIR"
 
 cd "$REPO_DIR"
-"$PYTHON" -u code/openalex/compare_openalex_citations_with_sciscinet.py
+"$PYTHON" -u code/openalex/citation/compare_openalex_citations_with_sciscinet.py

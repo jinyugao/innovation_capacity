@@ -1,7 +1,8 @@
 #!/bin/bash
+# Archived redundant filter; not part of the active run order.
 #SBATCH --job-name=filter_openalex_authorships_institutions_workids_pmid
-#SBATCH --output=/xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/openalex/filter_openalex_authorships_institutions_workids_pmid_%j.out
-#SBATCH --error=/xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/openalex/filter_openalex_authorships_institutions_workids_pmid_%j.err
+#SBATCH --output=/xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/openalex/institution/filter_openalex_authorships_institutions_workids_pmid_%j.out
+#SBATCH --error=/xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/openalex/institution/filter_openalex_authorships_institutions_workids_pmid_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -15,7 +16,7 @@ set -euo pipefail
 export IC_PROJECT_ROOT="${IC_PROJECT_ROOT:-/xdisk/sebratt/jinyugao/research/projects/innovation_capacity}"
 export IC_REPO_ROOT="${IC_REPO_ROOT:-/xdisk/sebratt/jinyugao/research/repos/innovation_capacity}"
 export IC_PYTHON="${IC_PYTHON:-/xdisk/sebratt/jinyugao/research/envs/innovation_capacity/bin/python}"
-export IC_OPENALEX_PROCESSED_DIR="${IC_OPENALEX_PROCESSED_DIR:-/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025}"
+export IC_OPENALEX_INSTITUTION_DIR="${IC_OPENALEX_INSTITUTION_DIR:-/xdisk/sebratt/jinyugao/research/data/processed/openalex/institution}"
 
 if [ ! -x "$IC_PYTHON" ]; then
     echo "Missing Python environment: $IC_PYTHON"
@@ -23,12 +24,12 @@ if [ ! -x "$IC_PYTHON" ]; then
     exit 1
 fi
 
-LOG_DIR="$IC_PROJECT_ROOT/logs/openalex"
+LOG_DIR="$IC_PROJECT_ROOT/logs/openalex/institution"
 
 mkdir -p "$LOG_DIR"
 
 cd "$IC_REPO_ROOT"
 
-echo "IC_OPENALEX_PROCESSED_DIR=$IC_OPENALEX_PROCESSED_DIR"
+echo "IC_OPENALEX_INSTITUTION_DIR=$IC_OPENALEX_INSTITUTION_DIR"
 
-"$IC_PYTHON" -u code/openalex/filter_openalex_authorships_institutions_workids_pmid.py
+"$IC_PYTHON" -u code/openalex/archive/filter_openalex_authorships_institutions_workids_pmid.py

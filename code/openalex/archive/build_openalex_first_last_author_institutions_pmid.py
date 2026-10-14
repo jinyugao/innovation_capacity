@@ -1,4 +1,8 @@
-"""Extract detailed first- and last-author institution rows from OpenAlex."""
+"""Archived analysis of first- and last-author institution rows from OpenAlex.
+
+This script uses the former CSV-based institution workflow and is not part of
+the active Country Adoption pipeline.
+"""
 
 from __future__ import annotations
 

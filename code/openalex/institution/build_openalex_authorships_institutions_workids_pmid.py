@@ -7,21 +7,28 @@ import re
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 
-DEFAULT_OPENALEX_DIR = Path(
+DEFAULT_FLATTENED_DIR = Path(
     "/xdisk/sebratt/jinyugao/research/data/processed/openalex/flattened_snapshot_2025"
 )
-OPENALEX_DIR = Path(
-    os.environ.get("IC_OPENALEX_PROCESSED_DIR", DEFAULT_OPENALEX_DIR)
+DEFAULT_INSTITUTION_DIR = Path(
+    "/xdisk/sebratt/jinyugao/research/data/processed/openalex/institution"
+)
+FLATTENED_DIR = Path(
+    os.environ.get("IC_OPENALEX_FLATTENED_DIR", DEFAULT_FLATTENED_DIR)
+).expanduser()
+INSTITUTION_DIR = Path(
+    os.environ.get("IC_OPENALEX_INSTITUTION_DIR", DEFAULT_INSTITUTION_DIR)
 ).expanduser()
 
-WORKS_IDS_FILE = OPENALEX_DIR / "openalex_works_ids.csv.gz"
-AUTHORSHIPS_FILE = OPENALEX_DIR / "openalex_works_authorships.csv.gz"
-INSTITUTIONS_FILE = OPENALEX_DIR / "openalex_institutions.csv.gz"
-INSTITUTIONS_GEO_FILE = OPENALEX_DIR / "openalex_institutions_geo.csv.gz"
+WORKS_IDS_FILE = FLATTENED_DIR / "openalex_works_ids.csv.gz"
+AUTHORSHIPS_FILE = FLATTENED_DIR / "openalex_works_authorships.csv.gz"
+INSTITUTIONS_FILE = FLATTENED_DIR / "openalex_institutions.csv.gz"
 
-OUTPUT_FILE = OPENALEX_DIR / "openalex_authorships_institutions_workids.csv.gz"
+OUTPUT_FILE = INSTITUTION_DIR / "openalex_authorships_institutions_workids_pmid.parquet"
 
 CHUNK_SIZE = 1_000_000
 OVERWRITE = False
@@ -50,6 +57,7 @@ OUTPUT_COLUMNS = [
     "institution_type",
     "raw_affiliation_string",
 ]
+OUTPUT_SCHEMA = pa.schema([(column, pa.string()) for column in OUTPUT_COLUMNS])
 
 
 def check_inputs(paths: list[Path]) -> None:
@@ -119,37 +127,29 @@ def load_pmid_work_ids(works_ids_file: Path) -> pd.DataFrame:
     return works_ids
 
 
-def load_institution_lookup(
-    institutions_file: Path,
-    institutions_geo_file: Path,
-) -> pd.DataFrame:
+def load_institution_lookup(institutions_file: Path) -> pd.DataFrame:
     institutions = pd.read_csv(
         institutions_file,
         compression="gzip",
-        usecols=["institution_id", "ror", "display_name", "country_code", "type"],
+        usecols=[
+            "institution_id",
+            "ror",
+            "display_name",
+            "country_code",
+            "country",
+            "type",
+        ],
         dtype="string",
     ).rename(
         columns={
             "ror": "institution_ror",
             "display_name": "institution_display_name",
             "country_code": "institution_country_code",
+            "country": "institution_country",
             "type": "institution_type",
         }
     )
-
-    institutions_geo = pd.read_csv(
-        institutions_geo_file,
-        compression="gzip",
-        usecols=["institution_id", "country"],
-        dtype="string",
-    ).rename(columns={"country": "institution_country"})
-
-    institution_lookup = institutions.merge(
-        institutions_geo.drop_duplicates(subset=["institution_id"]),
-        on="institution_id",
-        how="left",
-    )
-    institution_lookup = institution_lookup.drop_duplicates(subset=["institution_id"])
+    institution_lookup = institutions.drop_duplicates(subset=["institution_id"])
     print(f"Loaded {len(institution_lookup):,} institution rows.")
     return institution_lookup
 
@@ -163,7 +163,6 @@ def build_authorship_table(
     work_ids = set(works_ids["work_id"])
     total_rows = 0
     kept_rows = 0
-    wrote_header = False
 
     reader = pd.read_csv(
         authorships_file,
@@ -173,40 +172,38 @@ def build_authorship_table(
         dtype="string",
     )
 
-    for chunk_number, chunk in enumerate(reader, start=1):
-        total_rows += len(chunk)
-        chunk = chunk[chunk["work_id"].isin(work_ids)].copy()
+    with pq.ParquetWriter(
+        output_file,
+        OUTPUT_SCHEMA,
+        compression="zstd",
+    ) as writer:
+        for chunk_number, chunk in enumerate(reader, start=1):
+            total_rows += len(chunk)
+            chunk = chunk[chunk["work_id"].isin(work_ids)].copy()
 
-        if chunk.empty:
+            if chunk.empty:
+                print(
+                    f"Authorships chunk {chunk_number:,}: read {total_rows:,} total rows; "
+                    f"kept {kept_rows:,} rows so far."
+                )
+                continue
+
+            chunk = chunk.merge(works_ids, on="work_id", how="left")
+            chunk = chunk.merge(institution_lookup, on="institution_id", how="left")
+            chunk = chunk.reindex(columns=OUTPUT_COLUMNS).astype("string")
+            kept_rows += len(chunk)
+
+            table = pa.Table.from_pandas(
+                chunk,
+                schema=OUTPUT_SCHEMA,
+                preserve_index=False,
+            )
+            writer.write_table(table)
+
             print(
                 f"Authorships chunk {chunk_number:,}: read {total_rows:,} total rows; "
-                f"kept {kept_rows:,} rows so far."
+                f"wrote {kept_rows:,} PMID-linked authorship-institution rows."
             )
-            continue
-
-        chunk = chunk.merge(works_ids, on="work_id", how="left")
-        chunk = chunk.merge(institution_lookup, on="institution_id", how="left")
-        chunk = chunk.reindex(columns=OUTPUT_COLUMNS)
-        kept_rows += len(chunk)
-
-        chunk.to_csv(
-            output_file,
-            mode="a",
-            index=False,
-            compression="gzip",
-            header=not wrote_header,
-        )
-        wrote_header = True
-
-        print(
-            f"Authorships chunk {chunk_number:,}: read {total_rows:,} total rows; "
-            f"wrote {kept_rows:,} PMID-linked authorship-institution rows."
-        )
-
-    if not wrote_header:
-        pd.DataFrame(columns=OUTPUT_COLUMNS).to_csv(
-            output_file, index=False, compression="gzip"
-        )
 
     print(f"Saved authorship-institution-work table to {output_file}")
     print(f"Total authorship rows read: {total_rows:,}")
@@ -214,18 +211,19 @@ def build_authorship_table(
 
 
 def main() -> None:
+    print(f"Flattened OpenAlex directory: {FLATTENED_DIR}")
+    print(f"Institution output directory: {INSTITUTION_DIR}")
     check_inputs(
         [
             WORKS_IDS_FILE,
             AUTHORSHIPS_FILE,
             INSTITUTIONS_FILE,
-            INSTITUTIONS_GEO_FILE,
         ]
     )
     check_output(OUTPUT_FILE, OVERWRITE)
 
     works_ids = load_pmid_work_ids(WORKS_IDS_FILE)
-    institution_lookup = load_institution_lookup(INSTITUTIONS_FILE, INSTITUTIONS_GEO_FILE)
+    institution_lookup = load_institution_lookup(INSTITUTIONS_FILE)
     build_authorship_table(
         works_ids=works_ids,
         institution_lookup=institution_lookup,

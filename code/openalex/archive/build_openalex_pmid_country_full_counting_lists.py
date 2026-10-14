@@ -1,7 +1,10 @@
-"""Build one full-counting country-list row per OpenAlex PMID.
+"""Archived helper for the former CSV-based country-list workflow.
 
-The input is the reusable long-format PMID-country full-counting table. The
-output contains one row per PMID with sorted country-code and country-name lists.
+This script is not part of the active Country Adoption pipeline. The active
+pipeline reads the long-format PMID-country Parquet directly.
+
+The legacy input is the long-format PMID-country full-counting CSV. The output
+contains one row per PMID with sorted country-code and country-name lists.
 
 Default NA parsing is disabled so the ISO country code "NA" for Namibia is
 preserved as a valid country code instead of being interpreted as missing.
