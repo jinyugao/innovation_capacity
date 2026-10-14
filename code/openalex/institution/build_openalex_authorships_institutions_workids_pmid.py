@@ -115,7 +115,10 @@ def create_lookup_tables(
                 {sql_literal(works_ids_file)},
                 header = true,
                 all_varchar = true,
-                nullstr = ''
+                nullstr = '',
+                delim = ',',
+                quote = '"',
+                escape = '"'
             )
         ),
         ranked AS (
@@ -170,7 +173,10 @@ def create_lookup_tables(
                 {sql_literal(institutions_file)},
                 header = true,
                 all_varchar = true,
-                nullstr = ''
+                nullstr = '',
+                delim = ',',
+                quote = '"',
+                escape = '"'
             )
         ),
         ranked AS (
@@ -285,7 +291,10 @@ def build_authorship_table(
                 {sql_literal(authorships_file)},
                 header = true,
                 all_varchar = true,
-                nullstr = ''
+                nullstr = '',
+                delim = ',',
+                quote = '"',
+                escape = '"'
             ) AS authorships
             INNER JOIN pmid_works AS works
                 ON nullif(trim(CAST(authorships.work_id AS VARCHAR)), '')
