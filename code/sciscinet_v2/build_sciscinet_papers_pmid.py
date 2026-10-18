@@ -29,6 +29,7 @@ def build(root=ROOT, source=SOURCE, ids=IDS, overwrite=False):
     outdir = root / 'data/processed/sciscinet_v2'
     output = outdir / 'sciscinet_papers_pmid.parquet'
     summary = outdir / 'sciscinet_papers_pmid_summary.csv'
+    rejected = outdir / 'sciscinet_papers_pmid_rejected_mappings.csv'
     outdir.mkdir(parents=True, exist_ok=True)
     if not overwrite and any(p.exists() for p in (output, summary)):
         raise FileExistsError('Output exists; set IC_SCISCINET_PMID_OVERWRITE=1 to replace')
@@ -46,10 +47,17 @@ def build(root=ROOT, source=SOURCE, ids=IDS, overwrite=False):
                 FROM read_csv({q(ids)}, header=true, all_varchar=true,
                     delim=',', quote='"', escape='"', nullstr='', compression='gzip')
                 WHERE pmid IS NOT NULL AND trim(pmid)<>'' ''')
-            bad = count(con, "SELECT COUNT(*) FROM candidates WHERE paperid='' OR PMID='' OR NOT regexp_matches(PMID, '[1-9]')")
-            if bad:
-                raise ValueError(f'{bad} nonempty PMID mappings have invalid work IDs or PMIDs')
-            con.execute('CREATE TEMP TABLE mapping AS SELECT DISTINCT paperid, PMID FROM candidates')
+            con.execute("""CREATE TEMP TABLE checked AS SELECT *, concat_ws(';',
+                CASE WHEN paperid IS NULL OR paperid='' THEN 'invalid_work_id' END,
+                CASE WHEN PMID IS NULL OR PMID='' OR NOT regexp_matches(PMID, '[1-9]')
+                    THEN 'invalid_pmid' END) rejection_reason FROM candidates""")
+            bad = count(con, "SELECT COUNT(*) FROM checked WHERE rejection_reason<>''")
+            # Publish diagnostics even if later conflict checks stop the job.
+            staged_rejected = Path(temp) / rejected.name
+            con.execute(f"COPY (SELECT * FROM checked WHERE rejection_reason<>'') TO {q(staged_rejected)} (FORMAT CSV, HEADER TRUE)")
+            staged_rejected.replace(rejected)
+            print(f'Skipping {bad:,} invalid distinct mappings; diagnostics: {rejected}', flush=True)
+            con.execute("CREATE TEMP TABLE mapping AS SELECT DISTINCT paperid, PMID FROM checked WHERE rejection_reason=''")
             conflicts = count(con, 'SELECT COUNT(*) FROM (SELECT paperid FROM mapping GROUP BY paperid HAVING COUNT(*)>1)')
             if conflicts:
                 raise ValueError(f'{conflicts} work IDs map to multiple PMIDs; resolve before joining')
@@ -75,7 +83,8 @@ def build(root=ROOT, source=SOURCE, ids=IDS, overwrite=False):
             if not nrows or invalid:
                 raise ValueError(f'Invalid/empty result: rows={nrows}, invalid PMID rows={invalid}')
             report = dict(openalex_ids_file=str(ids), sciscinet_source_file=str(source),
-                output_file=str(output), n_mapped_works=mapped,
+                output_file=str(output), rejected_mappings_file=str(rejected),
+                n_invalid_distinct_mappings_skipped=bad, n_mapped_works=mapped,
                 n_mapped_pmids=count(con, 'SELECT COUNT(DISTINCT PMID) FROM mapping'),
                 n_pmids_with_multiple_work_ids=multi, n_output_records=nrows,
                 n_matched_works=nworks, n_unmatched_mapped_works=mapped-nworks,

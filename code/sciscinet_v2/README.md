@@ -2,8 +2,8 @@
 
 `build_sciscinet_papers_pmid.py` reads the OpenAlex work-ID CSV, selects nonempty
 PMIDs, removes exact duplicate mappings, and normalizes work URLs to `W...` and
-PMID URLs to numeric strings. Invalid nonempty IDs and work IDs with conflicting
-PMIDs stop execution. A PMID associated with multiple work IDs is retained and
+PMID URLs to numeric strings. Invalid nonempty IDs are skipped and exported with raw values and rejection
+reasons. Work IDs with conflicting valid PMIDs still stop execution. A PMID associated with multiple work IDs is retained and
 reported. Explicit CSV quoting handles DOIs containing commas.
 
 The script joins this unique-work mapping to SciSciNet `paperid`, retaining
@@ -21,7 +21,9 @@ Defaults:
 Outputs under `data/processed/sciscinet_v2/`:
 
 - `sciscinet_papers_pmid.parquet`
-- `sciscinet_papers_pmid_summary.csv`: mapped/matched/unmatched works, match
+- `sciscinet_papers_pmid_rejected_mappings.csv`: invalid distinct mappings and
+  reasons, written even if a later check fails. Refreshed on each attempted run.
+- `sciscinet_papers_pmid_summary.csv`: skipped-invalid count, mapped/matched/unmatched works, match
   rate, PMID counts, multiple-work PMID count, output record counts and checks.
 
 Dependency: DuckDB. Optional environment overrides: `IC_PROJECT_ROOT`,
