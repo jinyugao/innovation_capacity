@@ -62,7 +62,7 @@ mkdir -p /xdisk/sebratt/jinyugao/research/projects/innovation_capacity/logs/data
 sbatch jobs/data_validation/audit_semmed_openalex.slurm
 ```
 
-Single job (not year array): global mappings are scanned once, not 44 times. Initial estimate: 8 CPUs, 64 GB RAM, 24 hours; no full-data runtime benchmark yet. The output parent needs temporary disk capacity. CLI overrides can follow the Slurm filename. Choose a new empty output directory for a rerun.
+Single job (not year array): global mappings are scanned once, not 44 times. Initial estimate: 4 CPUs, 64 GB RAM, 24 hours; no full-data runtime benchmark yet. The output parent needs temporary disk capacity. CLI overrides can follow the Slurm filename. Choose a new empty output directory for a rerun.
 
 ## Validation
 
@@ -71,3 +71,12 @@ python code/data_validation/semmeddb_openalex/test_audit_semmed_openalex.py -b
 ```
 
 Synthetic fixtures cover unique matches/differences; multi-work all/some/none/incomplete years; absent mappings/years; global inverse mapping conflicts; conflicting SemMedDB and analysis years; identical duplicate source rows; malformed IDs; strict invalid-year rejection; compressed/headered/headerless CSVs; quoted DOI commas; PMID leading zeros; preservation of raw date evidence; exact PMID/link totals; and overwrite protection. These tests do not replace the pending full HPC run.
+
+
+## Memory fix after the first HPC run
+
+The first full run exhausted the 48GB DuckDB limit while aggregating SemMedDB dates across roughly 19.5 million PMID groups. SemMedDB date strings, DOI strings, OpenAlex year strings and the final per-PMID counts now aggregate in sequential hash buckets (default 64). Records with the same grouping key always stay together. A disk-backed table is clustered by bucket before aggregation to allow scan pruning, then dropped after use. This adds temporary disk I/O while reducing aggregate state held in memory. No conflict/year rules change.
+
+Override `--aggregation-buckets` or `IC_AUDIT_AGGREGATION_BUCKETS` (e.g. 128 for smaller batches). The Slurm default is now 4 CPUs and 48GB DuckDB memory within a 64GB job. No year array is needed. Validation metadata records the bucket count and DuckDB version. Tests compare one-bucket and seven-bucket outputs using bidirectional EXCEPT ALL, in addition to the existing source/conflict tests. Full HPC memory performance still requires rerunning.
+
+Local memory smoke test: 100,000 unique PMIDs, 256MB DuckDB memory limit, one thread and 16 buckets completed with 100,000 all-match rows. This is not a full-data memory guarantee.

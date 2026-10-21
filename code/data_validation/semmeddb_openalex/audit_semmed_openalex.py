@@ -45,6 +45,8 @@ def citations_scan(args):
     return f"read_csv({q(args.citations)},header=false,columns={{'PMID':'VARCHAR','ISSN':'VARCHAR','DP':'VARCHAR','EDAT':'VARCHAR','PYEAR':'VARCHAR'}},delim=',',quote='\"',escape='\"',nullstr='')"
 
 def run(args):
+    if args.aggregation_buckets<1:
+        raise ValueError('aggregation-buckets must be positive')
     if args.sample_size<1:
         raise ValueError('sample-size must be positive')
     for key in ['analysis','citations','ids','years']:
@@ -55,12 +57,29 @@ def run(args):
     with tempfile.TemporaryDirectory(prefix='semmed_openalex_',dir=args.output.parent) as temp:
         stage=Path(temp)/'results';stage.mkdir()
         with duckdb.connect(str(Path(temp)/'audit.duckdb')) as con:
-            con.execute(f"SET threads={int(os.getenv('IC_DUCKDB_THREADS','8'))}")
+            con.execute(f"SET threads={int(os.getenv('IC_DUCKDB_THREADS','4'))}")
             con.execute(f"SET memory_limit={q(os.getenv('IC_DUCKDB_MEMORY_LIMIT','48GB'))}")
             con.execute(f"SET temp_directory={q(Path(temp)/'spill')}")
             con.execute('SET preserve_insertion_order=false')
             def sql(s):con.execute(s)
             def n(s):return con.execute(s).fetchone()[0]
+            def aggregate(statement,source,key):
+                # Ordered DISTINCT string aggregates can retain many states in RAM.
+                # Cluster on a deterministic key hash, then aggregate one bucket at a time.
+                # Keeping each key in a single bucket preserves all distinct/count rules.
+                name=statement.split()[2]
+                bucket_table='_buckets_'+name
+                buckets=args.aggregation_buckets
+                print(f'Aggregating {name} in {buckets} hash buckets',flush=True)
+                sql(f'CREATE TABLE {bucket_table} AS SELECT *,hash({key}) % {buckets} AS audit_bucket FROM {source} ORDER BY audit_bucket')
+                for bucket in range(buckets):
+                    part=statement.replace(f'FROM {source} GROUP BY',f'FROM {bucket_table} WHERE audit_bucket={bucket} GROUP BY')
+                    if part==statement:raise ValueError(f'Unsupported partition source: {source}')
+                    if bucket:
+                        part=part.replace(f'CREATE TABLE {name} AS',f'INSERT INTO {name}',1)
+                    sql(part)
+                sql(f'DROP TABLE {bucket_table}')
+
             def export(s,name):
                 fmt='PARQUET, COMPRESSION ZSTD' if name.endswith('.parquet') else 'CSV, HEADER TRUE'
                 sql(f'COPY ({s}) TO {q(stage/name)} (FORMAT {fmt})')
@@ -82,7 +101,7 @@ def run(args):
                 {year(edat_expr)} edat_year
                 FROM {citations_scan(args)} WHERE {pmid('PMID')} IN (SELECT pmid FROM cohort)''')
             export('SELECT DISTINCT * FROM dates','semmed_citation_dates.parquet')
-            sql('''CREATE TABLE semmed AS SELECT pmid,count(*) semmed_rows,
+            aggregate('''CREATE TABLE semmed AS SELECT pmid,count(*) semmed_rows,
                 string_agg(DISTINCT ISSN,'; ' ORDER BY ISSN) journal_issns,
                 string_agg(DISTINCT raw_pyear,'; ' ORDER BY raw_pyear) raw_semmed_years,
                 string_agg(DISTINCT DP,'; ' ORDER BY DP) raw_semmed_dp,
@@ -92,7 +111,7 @@ def run(args):
                 CASE WHEN count(DISTINCT semmed_year)=1 AND count(*) FILTER(WHERE semmed_year IS NULL)=0 THEN min(semmed_year) END semmed_year,
                 CASE WHEN count(DISTINCT dp_year)=1 AND count(*) FILTER(WHERE dp_year IS NULL)=0 THEN min(dp_year) END dp_year,
                 CASE WHEN count(DISTINCT edat_year)=1 AND count(*) FILTER(WHERE edat_year IS NULL)=0 THEN min(edat_year) END edat_year
-                FROM dates GROUP BY pmid''')
+                FROM dates GROUP BY pmid''','dates','pmid')
             print('2/4: global OpenAlex PMID-work cardinalities',flush=True)
             sql(f'''CREATE TABLE ids_raw AS SELECT trim(work_id) raw_work_id,trim(pmid) raw_pmid,trim(doi) raw_doi,
                 {work('work_id')} work_id,{pmid('pmid')} pmid,
@@ -105,19 +124,21 @@ def run(args):
             export("SELECT 'global_openalex' AS scope,n_works,count(*) n_pmids,sum(n_works) n_pmid_work_links FROM global_pmid GROUP BY n_works ORDER BY n_works",'global_work_multiplicity.csv')
             sql('CREATE TABLE target_mapping AS SELECT m.*,w.n_pmids_for_work FROM mappings m JOIN global_work w USING(work_id) SEMI JOIN cohort USING(pmid)')
             sql('CREATE TABLE target_works AS SELECT DISTINCT work_id FROM target_mapping')
-            sql('''CREATE TABLE dois AS SELECT work_id,count(DISTINCT doi) n_dois_for_work,
+            sql('CREATE TABLE doi_input AS SELECT * FROM ids_raw SEMI JOIN target_works USING(work_id)')
+            aggregate('''CREATE TABLE dois AS SELECT work_id,count(DISTINCT doi) n_dois_for_work,
                 string_agg(DISTINCT raw_doi,'; ' ORDER BY raw_doi) raw_dois,
                 CASE WHEN count(DISTINCT doi)=1 THEN min(doi) END doi
-                FROM ids_raw SEMI JOIN target_works USING(work_id) GROUP BY work_id''')
+                FROM doi_input GROUP BY work_id''','doi_input','work_id')
+            sql('DROP TABLE doi_input')
             print('3/4: OpenAlex publication years',flush=True)
             sql(f'''CREATE TABLE oa_raw AS SELECT {work('work_id')} work_id,
                 publication_year raw_year,{year('publication_year')} oa_year
                 FROM {scan(args.years)} WHERE {work('work_id')} IN (SELECT work_id FROM target_works)''')
-            sql('''CREATE TABLE oa AS SELECT work_id,count(*) oa_rows,count(DISTINCT oa_year) n_oa_years,
+            aggregate('''CREATE TABLE oa AS SELECT work_id,count(*) oa_rows,count(DISTINCT oa_year) n_oa_years,
                 count(*) FILTER(WHERE oa_year IS NULL) invalid_oa_year_rows,
                 string_agg(DISTINCT raw_year,'; ' ORDER BY raw_year) raw_openalex_years,
                 CASE WHEN count(DISTINCT oa_year)=1 AND count(*) FILTER(WHERE oa_year IS NULL)=0 THEN min(oa_year) END openalex_year
-                FROM oa_raw GROUP BY work_id''')
+                FROM oa_raw GROUP BY work_id''','oa_raw','work_id')
             export('SELECT * FROM oa WHERE oa_rows>1 OR n_oa_years<>1 OR invalid_oa_year_rows>0','openalex_year_key_diagnostics.csv')
             print('4/4: one-row-per-PMID classifications and summaries',flush=True)
             sql('''CREATE TABLE links AS SELECT a.*,s.* EXCLUDE(pmid),m.work_id,m.n_pmids_for_work,
@@ -130,7 +151,7 @@ def run(args):
                 FROM cohort a LEFT JOIN semmed s USING(pmid) LEFT JOIN target_mapping m USING(pmid)
                 LEFT JOIN oa o USING(work_id) LEFT JOIN dois d USING(work_id)''')
             export('SELECT * FROM links','pmid_work_year_details.parquet')
-            sql('''CREATE TABLE paper_counts AS SELECT pmid,analysis_year,n_analysis_years,
+            aggregate('''CREATE TABLE paper_counts AS SELECT pmid,analysis_year,n_analysis_years,
                 semmed_year,dp_year,edat_year,journal_issns,semmed_rows,n_semmed_years,invalid_semmed_year_rows,
                 count(work_id) n_works,
                 count(*) FILTER(WHERE work_id IS NOT NULL AND openalex_year IS NOT NULL) n_works_with_usable_year,
@@ -144,7 +165,7 @@ def run(args):
                 count(*) FILTER(WHERE doi IS NOT NULL) n_works_with_usable_doi,
                 count(DISTINCT doi) n_distinct_usable_dois,
                 count(*) FILTER(WHERE n_dois_for_work>1) n_works_with_conflicting_dois
-                FROM links GROUP BY ALL''')
+                FROM links GROUP BY ALL''','links','pmid')
             sql('''CREATE TABLE papers AS SELECT *,
                 CASE WHEN n_works=0 THEN 'unmatched' WHEN n_works=1 THEN 'single_work' ELSE 'multiple_works' END mapping_group,
                 CASE WHEN n_works=0 THEN 'unmatched'
@@ -191,6 +212,7 @@ def run(args):
                 'cohort_max_works_per_pmid':n('SELECT max(n_works) FROM papers'),
                 'cohort_pmids_with_no_mapping':n('SELECT count(*) FROM papers WHERE n_works=0'),
                 'cohort_pmids_with_any_observed_year_difference':n('SELECT count(*) FROM papers WHERE n_different_year_works>0'),
+                'aggregation_buckets':args.aggregation_buckets,'duckdb_version':duckdb.__version__,
                 'output_pmid_rows':cohort_n,'output_link_rows':expected,'all_checks_passed':True,
                 'note':'No SciSciNet input. Matching work years do not prove bibliographic identity. Missing/ambiguous years are not counted as equal or different. Status groups are mutually exclusive at PMID level; year-difference rows may overlap at PMID level.'}
             (stage/'validation_summary.json').write_text(json.dumps(report,indent=2))
@@ -209,6 +231,7 @@ def parser():
     p.add_argument('--output',type=Path,default=PROJECT/'data/processed/data_validation/semmeddb_openalex')
     p.add_argument('--citations-header',action='store_true')
     p.add_argument('--sample-size',type=int,default=100)
+    p.add_argument('--aggregation-buckets',type=int,default=int(os.getenv('IC_AUDIT_AGGREGATION_BUCKETS','64')),help='Hash buckets for high-cardinality aggregates (default: 64)')
     return p
 
 if __name__=='__main__':run(parser().parse_args())

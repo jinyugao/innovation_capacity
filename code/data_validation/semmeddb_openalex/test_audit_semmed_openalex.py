@@ -32,7 +32,7 @@ class AuditTest(unittest.TestCase):
         years += [('W33','2001'),('W44','2000'),('W55','2002'),('W66','bad'),('W1','2001')]
         with gzip.open(root/'years.csv.gz','wt',newline='') as h:
             w=csv.writer(h);w.writerow(['work_id','publication_year']);w.writerows(years)
-        argv=['--analysis',str(root/'analysis.parquet'),'--citations',str(root/'citations.csv.gz'),'--ids',str(root/'ids.csv.gz'),'--years',str(root/'years.csv.gz'),'--output',str(root/'out')]
+        argv=['--aggregation-buckets','3','--analysis',str(root/'analysis.parquet'),'--citations',str(root/'citations.csv.gz'),'--ids',str(root/'ids.csv.gz'),'--years',str(root/'years.csv.gz'),'--output',str(root/'out')]
         if header:argv+=['--citations-header']
         return audit.parser().parse_args(argv)
 
@@ -91,6 +91,19 @@ class AuditTest(unittest.TestCase):
             audit.run(args)
             c=duckdb.connect()
             self.assertEqual(c.execute(f"SELECT count(*) FROM '{root/'out/pmid_summary.parquet'}' WHERE year_status='semmed_year_unavailable'").fetchone()[0],11)
+            c.close()
+
+    def test_partition_equivalence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);args=self.fixture(root)
+            args.aggregation_buckets=1
+            audit.run(args)
+            args.output=root/'partitioned';args.aggregation_buckets=7
+            audit.run(args)
+            c=duckdb.connect()
+            for file in ['pmid_summary.parquet','pmid_work_year_details.parquet']:
+                left=str(root/'out'/file);right=str(root/'partitioned'/file)
+                self.assertEqual(c.execute(f"SELECT count(*) FROM ((SELECT * FROM '{left}' EXCEPT ALL SELECT * FROM '{right}') UNION ALL (SELECT * FROM '{right}' EXCEPT ALL SELECT * FROM '{left}'))").fetchone()[0],0)
             c.close()
 
 if __name__=='__main__':unittest.main()
